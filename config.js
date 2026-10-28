@@ -11,8 +11,8 @@
 // les comptes et les fiches sont stockés dans le navigateur uniquement,
 // pratique pour tester mais PAS partagé avec le groupe.
 
-export const SUPABASE_URL = '';
-export const SUPABASE_KEY = '';
+export const SUPABASE_URL = 'https://rvsfnwzctddhrwmzceih.supabase.co';
+export const SUPABASE_KEY = 'sb_publishable_caE5umB9dF6YuHpE4PdUGg_CN5YSMJm';
 
 // Nom affiché en haut du site.
 export const CAMPAIGN_NAME = 'Notre campagne';

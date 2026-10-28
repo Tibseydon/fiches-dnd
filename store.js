@@ -1,7 +1,7 @@
 // Couche de stockage : Supabase (partagé) ou localStorage (mode test).
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
-const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
+const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.76.1/+esm';
 
 export const mode = SUPABASE_URL && SUPABASE_KEY ? 'supabase' : 'local';
 
