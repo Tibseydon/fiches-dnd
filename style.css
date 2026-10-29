@@ -418,3 +418,5 @@ details summary b { color: var(--ink); }
 .lib-book summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 #lib-form textarea { font-size: .9rem; }
+
+.option-head .vo { display: block; font: italic 500 .75rem Inter, sans-serif; color: var(--muted); text-transform: none; letter-spacing: 0; margin-top: 2px; }

@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291338';
-import { CAMPAIGN_NAME } from './config.js?v=202610291338';
+import * as store from './store.js?v=202610291350';
+import { CAMPAIGN_NAME } from './config.js?v=202610291350';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
-  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, byId,
-} from './data.js?v=202610291338';
-import * as R from './rules.js?v=202610291338';
+  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
+} from './data.js?v=202610291350';
+import * as R from './rules.js?v=202610291350';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291338';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291338';
+} from './info.js?v=202610291350';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291350';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -75,7 +75,10 @@ const infoRows = rows => `<dl class="info-rows">${rows.filter(([, v]) => v).map(
   `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 const infoList = items => `<ul class="info-list">${items.map(([k, v]) =>
   `<li><b>${esc(k)}</b>${v ? ` — ${esc(v)}` : ''}</li>`).join('')}</ul>`;
-const srcLine = src => (src && src !== 'phb' && src !== 'custom' ? `<p class="info-src">Source : ${esc(SOURCES[src])}</p>` : '');
+const srcLine = (src, original = '') => [
+  src && src !== 'phb' && src !== 'custom' ? `Source : ${esc(SOURCES[src])}` : '',
+  original ? `Nom d'origine : <i>${esc(original)}</i>` : '',
+].filter(Boolean).map(t => `<p class="info-src">${t}</p>`).join('');
 const skillName = id => byId(SKILLS, id)?.name ?? id;
 const casterLabel = { full: 'Lanceur complet', half: 'Semi-lanceur', pact: 'Magie de pacte' };
 
@@ -83,9 +86,12 @@ function classInfo(id) {
   const base = byId(CLASSES, id);
   if (!base) return null;
   const cls = infoCharacter?.classId === id ? R.classOf(infoCharacter) : base;
-  const subs = bySource(cls.subclasses.map(n => ({ name: n, source: cls.subclassSources?.[n] ?? cls.source })));
+  const subs = bySource(cls.subclasses.map(n => ({
+    name: cls.subclassOriginal?.[n] ? `${n} (${cls.subclassOriginal[n]})` : n,
+    source: cls.subclassSources?.[n] ?? cls.source,
+  })));
   return [cls.name, `
-    ${srcLine(cls.source)}
+    ${srcLine(cls.source, cls.original)}
     ${cls.verify ? '<p class="notice wide">Données non toutes confirmées : vérifie-les dans ton livre et ajuste-les dans « Réglages de classe » sur la fiche.</p>' : ''}
     <p>${esc(cls.desc)}</p>
     ${infoRows([
@@ -116,7 +122,7 @@ function speciesInfo(id) {
   if (!sp) return null;
   const traits = SPECIES_INFO[id] ?? (sp.traitsInfo?.length ? sp.traitsInfo : null);
   return [sp.name, `
-    ${srcLine(sp.source)}
+    ${srcLine(sp.source, sp.original)}
     ${infoRows([
       ['Taille', sp.size !== '—' ? esc(sp.size) : ''],
       ['Vitesse', `${String(sp.speed).replace('.', ',')} m`],
@@ -164,9 +170,10 @@ function infoContent(key) {
     case 'subclass': {
       const c = infoCharacter;
       const cls = c && R.classOf(c);
-      const src = cls?.subclassSources?.[c.subclass];
-      const lib = LIB_INFO.subclasses[c?.subclass];
-      return [c?.subclass || 'Sous-classe', `${src ? srcLine(src) : ''}
+      const name = subclassName(cls, c?.subclass);
+      const src = cls?.subclassSources?.[name];
+      const lib = LIB_INFO.subclasses[name];
+      return [name || 'Sous-classe', `${src ? srcLine(src, cls.subclassOriginal?.[name]) : ''}
         ${lib ? `${lib.summary ? `<p>${esc(lib.summary)}</p>` : ''}${lib.features.length ? infoList(lib.features
           .sort((a, b) => a.level - b.level).map(f => [`Niv. ${f.level} — ${f.name}`, f.summary])) : ''}`
           : `<p>${esc(STAT_INFO.subclass[1])}</p>
@@ -375,7 +382,7 @@ function partyView() {
 function partyCard(c) {
   const sp = R.spellInfo(c);
   const mine = c.ownerUid === me.uid;
-  const sub = c.subclass ? ` — ${esc(c.subclass)}` : '';
+  const sub = c.subclass ? ` — ${esc(subclassName(R.classOf(c), c.subclass))}` : '';
   return `<a class="card char-card${mine ? ' mine' : ''}" href="#/perso/${esc(c.id)}">
     <div class="cc-head">
       ${portrait(c)}
@@ -553,7 +560,7 @@ function makeChunks(pages) {
   return chunks;
 }
 
-const itemKey = it => `${it.kind}|${String(it.name).trim().toLowerCase()}`;
+const itemKey = it => `${it.kind}|${String(it.original_name || it.name).trim().toLowerCase()}`;
 
 // Fusionne les éléments d'une partie avec ceux déjà trouvés (une option peut chevaucher deux parties).
 function mergeItems(acc, items) {
@@ -593,7 +600,8 @@ function libraryView() {
       <div class="row">
         <label class="check"><input type="checkbox" data-inc="${i}" ${it.include ? 'checked' : ''}> garder</label>
         <select data-it="${i}" data-f="kind">${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${it.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <input data-it="${i}" data-f="name" value="${esc(it.name)}" class="lib-name">
+        <input data-it="${i}" data-f="name" value="${esc(it.name)}" class="lib-name" title="${esc(it.original_name ? `Nom d'origine : ${it.original_name}` : '')}">
+        ${it.original_name && it.original_name !== it.name ? `<small class="muted">VO : ${esc(it.original_name)}</small>` : ''}
         ${it.kind === 'subclass' ? `<select data-it="${i}" data-f="parent_class">${CLASSES.filter(c => c.source === 'phb' || c.id === 'artificer').map(c =>
           `<option value="${c.id}" ${it.parent_class === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
           <option value="other" ${it.parent_class === 'other' ? 'selected' : ''}>Autre : ${esc(it.parent_class_name || '?')}</option></select>` : ''}
@@ -694,7 +702,7 @@ function libraryView() {
           try {
             const res = await store.libraryCall({
               action: 'extract', title: st.title, text: st.chunks[i].text,
-              known: st.items.map(x => ({ kind: x.kind, name: x.name })),
+              known: st.items.map(x => ({ kind: x.kind, name: x.original_name || x.name })),
             });
             if (res.model) st.model = res.model;
             st.cost += costOf(st.model, res.usage?.input_tokens ?? 0, res.usage?.output_tokens ?? 0);
@@ -928,7 +936,7 @@ function wizardView() {
   const infoKey = { classId: 'class', speciesId: 'species', backgroundId: 'bg' };
   const optionCard = (field, o, body) => `
     <div class="card option${w[field] === o.id ? ' selected' : ''}" role="button" tabindex="0" aria-pressed="${w[field] === o.id}" data-pick="${field}" data-val="${o.id}">
-      <div class="option-head"><h3>${esc(o.name)}</h3>${infoBtn(`${infoKey[field]}:${o.id}`, o.name)}</div>${body}
+      <div class="option-head"><h3>${esc(o.name)}${o.original && o.original !== o.name ? ` <small class="vo">${esc(o.original)}</small>` : ''}</h3>${infoBtn(`${infoKey[field]}:${o.id}`, o.name)}</div>${body}
     </div>`;
 
   // Filtre par livre + cartes groupées par livre.
@@ -1387,7 +1395,7 @@ function sheetView(id) {
       ${portrait(c, 'big')}
       <div class="sh-main">
         <input class="char-name" data-p="name" value="${esc(c.name)}" ${dis()} aria-label="Nom du personnage">
-        <div class="muted"><span data-d="label"></span>${c.subclass ? ` — ${esc(c.subclass)}` : ''} · joué par ${esc(c.ownerName)}</div>
+        <div class="muted"><span data-d="label"></span>${c.subclass ? ` — ${esc(subclassName(cls, c.subclass))}` : ''} · joué par ${esc(c.ownerName)}</div>
         <div class="sh-fields">
           <label><span class="lbl-row">Classe ${infoBtn(`class:${c.classId}`)}</span>${selGrouped('classId', CLASSES)}</label>
           ${c.classId === 'custom' ? `<label>Nom de la classe ${inp('customClassName')}</label>` : ''}

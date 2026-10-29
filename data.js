@@ -1,5 +1,5 @@
 // Données de règles D&D 5.5 (Manuel des joueurs 2024), en français.
-import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js?v=202610291338';
+import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES, SUBCLASS_ORIGINAL } from './extensions.js?v=202610291350';
 
 export { SOURCES };
 
@@ -286,9 +286,12 @@ CLASSES.forEach(c => (c.source = 'phb'));
 CLASSES.push(...EXTRA_CLASSES);
 CLASSES.forEach(c => {
   c.subclassSources = Object.fromEntries(c.subclasses.map(n => [n, c.source]));
-  (EXTRA_SUBCLASSES[c.id] ?? []).forEach(([n, src]) => {
+  // Nom d'origine (anglais) des sous-classes traduites, pour les retrouver dans le livre.
+  c.subclassOriginal = Object.fromEntries(c.subclasses.filter(n => SUBCLASS_ORIGINAL[n]).map(n => [n, SUBCLASS_ORIGINAL[n]]));
+  (EXTRA_SUBCLASSES[c.id] ?? []).forEach(([n, src, original]) => {
     c.subclasses.push(n);
     c.subclassSources[n] = src;
+    if (original) c.subclassOriginal[n] = original;
   });
 });
 SPECIES.forEach(s => (s.source = 'phb'));
@@ -298,7 +301,15 @@ Object.entries(EXTRA_LINEAGES).forEach(([id, l]) => byId(SPECIES, id).lineages.p
 // ── Contenus importés par le MJ (bibliothèque Supabase) ─────
 // Les données importées s'ajoutent aux listes ci-dessus après la connexion.
 
-const cloneClass = c => ({ ...c, subclasses: [...c.subclasses], subclassSources: { ...c.subclassSources } });
+const cloneClass = c => ({
+  ...c, subclasses: [...c.subclasses], subclassSources: { ...c.subclassSources }, subclassOriginal: { ...c.subclassOriginal },
+});
+
+// Nom français d'une sous-classe enregistrée sous son ancien nom anglais (fiches créées avant la traduction).
+export function subclassName(cls, name) {
+  if (!cls || !name) return name;
+  return Object.entries(cls.subclassOriginal ?? {}).find(([, en]) => en === name)?.[0] ?? name;
+}
 const BASE = {
   classes: CLASSES.map(cloneClass),
   species: [...SPECIES],
@@ -349,7 +360,7 @@ export function applyLibrary(items = []) {
     const id = `lib-${slugify(it.name)}`;
     if (it.kind === 'class' && !byId(CLASSES, id)) {
       insertBeforeCustom(CLASSES, {
-        id, name: it.name, source, imported: true,
+        id, name: it.name, source, imported: true, original: d.original_name || '',
         hd: [6, 8, 10, 12].includes(d.hit_die) ? d.hit_die : 8,
         primary: d.primary_ability || '—',
         saves: (d.saving_throws ?? []).filter(a => ABILITY_IDS.includes(a)),
@@ -366,14 +377,15 @@ export function applyLibrary(items = []) {
     } else if (it.kind === 'subclass') {
       const parent = d.parent_class && d.parent_class !== 'other'
         ? byId(CLASSES, d.parent_class)
-        : CLASSES.find(c => c.name.toLowerCase() === String(d.parent_class_name ?? '').trim().toLowerCase());
+        : CLASSES.find(c => [c.name, c.original].some(n => n && n.toLowerCase() === String(d.parent_class_name ?? '').trim().toLowerCase()));
       if (!parent) return;
       if (!parent.subclasses.includes(it.name)) parent.subclasses.push(it.name);
       parent.subclassSources[it.name] = source;
+      if (d.original_name && d.original_name !== it.name) parent.subclassOriginal[it.name] = d.original_name;
       LIB_INFO.subclasses[it.name] = { summary: d.summary || '', features };
     } else if (it.kind === 'species' && !byId(SPECIES, id)) {
       insertBeforeCustom(SPECIES, {
-        id, name: it.name, source, imported: true,
+        id, name: it.name, source, imported: true, original: d.original_name || '',
         speed: d.speed_m > 0 ? d.speed_m : 9,
         size: d.size || '—',
         darkvision: d.darkvision_m || 0,

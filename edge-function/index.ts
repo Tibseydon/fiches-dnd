@@ -52,13 +52,14 @@ const SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: [
-          "kind", "name", "parent_class", "parent_class_name", "summary", "hit_die", "primary_ability",
+          "kind", "name", "original_name", "parent_class", "parent_class_name", "summary", "hit_die", "primary_ability",
           "saving_throws", "skill_count", "skill_options", "spellcasting", "spell_ability", "armor", "weapons",
           "tools", "size", "speed_m", "darkvision_m", "ability_options", "origin_feat", "skills", "features",
         ],
         properties: {
           kind: { type: "string", enum: ["class", "subclass", "species", "background", "feat"] },
           name: str,
+          original_name: str,
           parent_class: { type: "string", enum: CLASS_IDS },
           parent_class_name: str,
           summary: str,
@@ -100,14 +101,14 @@ Extract only player options: classes, subclasses, species (races), backgrounds a
 Rules:
 - Write every "summary" in French, in your own words, in one or two short sentences describing what the option or feature does in play. Never copy the book's sentences.
 - Keep game data exact: hit die, saving throws, skill choices, levels, distances. Convert feet to metres (5 ft = 1.5 m).
-- Keep proper names (the option's name) as printed in the book.
+- "name": the option's name in French (use the official French name if one exists, otherwise translate it naturally). "original_name": the name exactly as printed in the book. Translate feature names into French too.
 - Use 0, "" or [] for anything that does not apply or is not in the excerpt. Never invent data.
 - "kind" = class: fill hit_die, primary_ability, saving_throws, skill_count, skill_options, spellcasting (third = one-third caster such as Eldritch Knight), spell_ability, armor, weapons, tools, and every class feature with its level in "features".
 - "kind" = subclass: set parent_class to the matching class id (barbarian, bard, cleric, druid, fighter, monk, paladin, ranger, rogue, sorcerer, warlock, wizard, artificer) or "other" with parent_class_name set to the class name. List its features with their levels.
 - "kind" = species: fill size, speed_m, darkvision_m and each trait in "features" (level 1, or the level at which it unlocks).
 - "kind" = background: fill ability_options (the abilities it can raise), origin_feat (feat name), skills, tools.
 - "kind" = feat: summary of the benefit; features may list prerequisites as a feature named "Prérequis".
-- The excerpt may start or end in the middle of an option. If it continues an option listed under "Already found", reuse exactly the same kind and name and give only the new information.
+- The excerpt may start or end in the middle of an option. If it continues an option listed under "Already found" (listed by original name), reuse exactly the same kind and original_name and give only the new information.
 - If the excerpt contains no player option, return {"items": []}.`;
 
 function isPrivateHost(host: string) {
