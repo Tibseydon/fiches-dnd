@@ -1,15 +1,22 @@
 // Fonction Supabase « extraire-livre » (voir README : Bibliothèque).
 // À coller dans Supabase → Edge Functions → Deploy a new function → Via Editor.
 // Secret requis : ANTHROPIC_API_KEY (Edge Functions → Secrets).
+// Secret facultatif : CLAUDE_MODEL = claude-opus-5-5 pour une extraction plus fiable mais plus chère
+// (par défaut : claude-haiku-5-5).
 //
-// Deux actions, réservées au MJ :
+// Actions, réservées au MJ :
+//   { action: "info" }                            → modèle utilisé (pour estimer le coût)
 //   { action: "fetch", url }                      → renvoie le fichier (PDF ou page web) tel quel
 //   { action: "extract", text, title, known }     → extrait les options de joueur d'un extrait de livre
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.134.0";
 import { createClient } from "npm:@supabase/supabase-js@2.76.1";
 
-const MODEL = "claude-opus-5-5";
+const MODEL = Deno.env.get("CLAUDE_MODEL")?.trim() || "claude-haiku-5-5";
+// Le relais automatique en cas de refus n'existe que pour la gamme Opus.
+const FALLBACK = MODEL.startsWith("claude-opus-")
+  ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+  : {};
 const MAX_FETCH_BYTES = 30 * 1024 * 1024;
 const MAX_TEXT_CHARS = 120_000;
 
@@ -122,6 +129,8 @@ Deno.serve(async (req) => {
   let body: { action?: string; url?: string; text?: string; title?: string; known?: { kind: string; name: string }[] };
   try { body = await req.json(); } catch { return json({ error: "Requête invalide." }, 400); }
 
+  if (body.action === "info") return json({ model: MODEL });
+
   if (body.action === "fetch") {
     let url: URL;
     try { url = new URL(body.url ?? ""); } catch { return json({ error: "Lien invalide." }, 400); }
@@ -150,9 +159,7 @@ Deno.serve(async (req) => {
         max_tokens: 16000,
         // Extraction structurée : un effort faible suffit et limite le coût.
         output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
-        // En cas de refus d'un filtre de sécurité, Anthropic relance sur le modèle recommandé.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        ...FALLBACK,
         system: SYSTEM,
         messages: [{
           role: "user",
@@ -161,14 +168,14 @@ Deno.serve(async (req) => {
       });
 
       if (response.stop_reason === "refusal") {
-        return json({ error: "Claude a refusé cet extrait.", items: [], usage: response.usage }, 200);
+        return json({ error: "Claude a refusé cet extrait.", items: [], usage: response.usage, model: MODEL }, 200);
       }
       if (response.stop_reason === "max_tokens") {
-        return json({ error: "Extrait trop dense : réduis la taille des parties.", items: [], usage: response.usage }, 200);
+        return json({ error: "Extrait trop dense : réduis la taille des parties.", items: [], usage: response.usage, model: MODEL }, 200);
       }
       const textBlock = response.content.find((b) => b.type === "text");
       const parsed = textBlock && textBlock.type === "text" ? JSON.parse(textBlock.text) : { items: [] };
-      return json({ items: parsed.items ?? [], usage: response.usage });
+      return json({ items: parsed.items ?? [], usage: response.usage, model: MODEL });
     } catch (e) {
       if (e instanceof Anthropic.AuthenticationError) return json({ error: "Clé API Anthropic invalide." }, 500);
       if (e instanceof Anthropic.RateLimitError) return json({ error: "Limite de débit Anthropic atteinte : réessaie dans une minute.", retry: true }, 429);

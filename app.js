@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291038';
-import { CAMPAIGN_NAME } from './config.js?v=202610291038';
+import * as store from './store.js?v=202610291053';
+import { CAMPAIGN_NAME } from './config.js?v=202610291053';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, byId,
-} from './data.js?v=202610291038';
-import * as R from './rules.js?v=202610291038';
+} from './data.js?v=202610291053';
+import * as R from './rules.js?v=202610291053';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291038';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291038';
+} from './info.js?v=202610291053';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291053';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -500,9 +500,13 @@ function campaignView() {
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38';
 const CHUNK_CHARS = 20000;
 const PARALLEL = 3;
-// Claude Opus 5.5 : 4 $ par million d'unités lues, 20 $ par million écrites.
-const PRICE_IN = 4 / 1e6;
-const PRICE_OUT = 20 / 1e6;
+// Prix par million d'unités (lues, écrites) des modèles utilisables par la fonction.
+const MODELS = {
+  'claude-haiku-5-5': { label: 'Claude Haiku 5.5', price: [0.10, 0.50] },
+  'claude-opus-5-5': { label: 'Claude Opus 5.5', price: [4, 20] },
+};
+const modelInfo = id => MODELS[id] ?? { label: id, price: MODELS['claude-opus-5-5'].price };
+const costOf = (model, tin, tout) => (tin * modelInfo(model).price[0] + tout * modelInfo(model).price[1]) / 1e6;
 const KIND_LABEL = { class: 'Classe', subclass: 'Sous-classe', species: 'Espèce', background: 'Historique', feat: 'Don' };
 
 async function reloadLibrary() {
@@ -570,13 +574,11 @@ function mergeItems(acc, items) {
   return acc;
 }
 
-function estimateCost(chars, parts) {
-  const input = chars / 3.5 + parts * 2500;
-  const output = parts * 3000;
-  const mid = input * PRICE_IN + output * PRICE_OUT;
+function estimateCost(model, chars, parts) {
+  const mid = costOf(model, chars / 3.5 + parts * 2500, parts * 3000);
   return [mid * 0.6, mid * 1.6];
 }
-const usd = n => `${n < 1 ? n.toFixed(2) : n.toFixed(1)} $`;
+const usd = n => `${n < 0.01 ? 'moins de 0,01' : n < 1 ? n.toFixed(2).replace('.', ',') : n.toFixed(1).replace('.', ',')} $`;
 
 function libraryView() {
   if (me.role !== 'mj') {
@@ -584,7 +586,7 @@ function libraryView() {
     return;
   }
   const root = mount('<div class="loading">Chargement…</div>');
-  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cancel: false, log: '' };
+  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cost: 0, cancel: false, log: '', model: 'claude-haiku-5-5' };
   let saved = [];
 
   const reviewRow = (it, i) => `<div class="card lib-item ${it.include ? '' : 'off'}">
@@ -609,7 +611,7 @@ function libraryView() {
     const kept = st.items.filter(x => x.include).length;
     const byBook = {};
     saved.forEach(x => (byBook[x.source_title] ??= []).push(x));
-    const [lo, hi] = estimateCost(st.chunks.reduce((n, c) => n + c.text.length, 0), st.chunks.length);
+    const [lo, hi] = estimateCost(st.model, st.chunks.reduce((n, c) => n + c.text.length, 0), st.chunks.length);
     root.innerHTML = `
       <div class="page-head"><div><h1>Bibliothèque</h1>
         <p class="muted">Importe les livres que tu possèdes : leurs classes, sous-classes, espèces, historiques et dons apparaissent ensuite dans l'assistant et sur les fiches. Les contenus restent privés, visibles seulement par les membres de la campagne.</p></div></div>
@@ -637,7 +639,7 @@ function libraryView() {
       ${st.phase === 'ready' ? `<section class="card">
         <h2>${esc(st.title)}</h2>
         <p>${esc(st.log)} → <b>${st.chunks.length}</b> partie${st.chunks.length > 1 ? 's' : ''} à analyser.</p>
-        <p>Coût estimé avec Claude Opus 5.5 : <b>${usd(lo)} à ${usd(hi)}</b> (facturé sur ta clé API Anthropic).</p>
+        <p>Coût estimé avec ${esc(modelInfo(st.model).label)} : <b>${hi < 0.01 ? 'moins de 0,01 $' : `${usd(lo)} à ${usd(hi)}`}</b> (facturé sur ta clé API Anthropic).</p>
         <div class="row">
           <button class="btn primary" data-a="lib-run">Lancer l'extraction</button>
           <button class="btn ghost" data-a="lib-reset">Annuler</button>
@@ -647,7 +649,7 @@ function libraryView() {
       ${st.phase === 'running' || st.phase === 'review' ? `<section class="card">
         <h2>${esc(st.title)}</h2>
         <div class="progress"><div style="width:${st.chunks.length ? (st.done / st.chunks.length) * 100 : 0}%"></div></div>
-        <p class="small">${st.done} / ${st.chunks.length} parties · ${st.items.length} élément(s) trouvé(s) · coût réel : ${usd(st.usage.in * PRICE_IN + st.usage.out * PRICE_OUT)}
+        <p class="small">${st.done} / ${st.chunks.length} parties · ${st.items.length} élément(s) trouvé(s) · coût réel : ${usd(st.cost)} (${esc(modelInfo(st.model).label)})
           ${st.failed.length ? ` · <span class="error">${st.failed.length} partie(s) en échec</span>` : ''}</p>
         ${st.log ? `<p class="error">${esc(st.log)}</p>` : ''}
         ${st.phase === 'running'
@@ -692,8 +694,8 @@ function libraryView() {
               action: 'extract', title: st.title, text: st.chunks[i].text,
               known: st.items.map(x => ({ kind: x.kind, name: x.name })),
             });
-            st.usage.in += res.usage?.input_tokens ?? 0;
-            st.usage.out += res.usage?.output_tokens ?? 0;
+            if (res.model) st.model = res.model;
+            st.cost += costOf(st.model, res.usage?.input_tokens ?? 0, res.usage?.output_tokens ?? 0);
             if (res.error) { st.failed.push(i); st.log = `Partie ${i + 1} : ${res.error}`; } else mergeItems(st.items, res.items ?? []);
             break;
           } catch (e) {
@@ -747,7 +749,9 @@ function libraryView() {
       }
       st.chunks = makeChunks(pages);
       if (!st.chunks.length) throw new Error('Aucun texte trouvé dans ce document.');
-      Object.assign(st, { phase: 'ready', items: [], done: 0, failed: [], usage: { in: 0, out: 0 } });
+      // Modèle configuré dans la fonction Supabase (pour l'estimation du coût).
+      st.model = (await store.libraryCall({ action: 'info' }).catch(() => null))?.model ?? st.model;
+      Object.assign(st, { phase: 'ready', items: [], done: 0, failed: [], cost: 0 });
     } catch (ex) {
       st.phase = 'form';
       st.log = ex.message;
