@@ -1,10 +1,13 @@
-import * as store from './store.js?v=202610290953';
-import { CAMPAIGN_NAME } from './config.js?v=202610290953';
+import * as store from './store.js?v=202610291001';
+import { CAMPAIGN_NAME } from './config.js?v=202610291001';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, byId,
-} from './data.js?v=202610290953';
-import * as R from './rules.js?v=202610290953';
+} from './data.js?v=202610291001';
+import * as R from './rules.js?v=202610291001';
+import {
+  ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
+} from './info.js?v=202610291001';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -58,6 +61,136 @@ function bySource(list) {
     .map(src => [src, list.filter(x => x.source === src)])
     .filter(([, items]) => items.length);
 }
+
+// ── Fiches d'information (icônes « i ») ─────────────────────
+
+// Personnage affiché sur la fiche : les infos de classe tiennent compte de ses réglages.
+let infoCharacter = null;
+
+const infoBtn = (key, label = '') =>
+  `<button type="button" class="info-btn" data-info="${esc(key)}" aria-label="Informations${label ? ` : ${esc(label)}` : ''}" title="Informations">i</button>`;
+
+const infoRows = rows => `<dl class="info-rows">${rows.filter(([, v]) => v).map(([k, v]) =>
+  `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+const infoList = items => `<ul class="info-list">${items.map(([k, v]) =>
+  `<li><b>${esc(k)}</b>${v ? ` — ${esc(v)}` : ''}</li>`).join('')}</ul>`;
+const srcLine = src => (src && src !== 'phb' && src !== 'custom' ? `<p class="info-src">Source : ${esc(SOURCES[src])}</p>` : '');
+const skillName = id => byId(SKILLS, id)?.name ?? id;
+const casterLabel = { full: 'Lanceur complet', half: 'Semi-lanceur', pact: 'Magie de pacte' };
+
+function classInfo(id) {
+  const base = byId(CLASSES, id);
+  if (!base) return null;
+  const cls = infoCharacter?.classId === id ? R.classOf(infoCharacter) : base;
+  const subs = bySource(cls.subclasses.map(n => ({ name: n, source: cls.subclassSources?.[n] ?? cls.source })));
+  return [cls.name, `
+    ${srcLine(cls.source)}
+    ${cls.verify ? '<p class="notice wide">Données non toutes confirmées : vérifie-les dans ton livre et ajuste-les dans « Réglages de classe » sur la fiche.</p>' : ''}
+    <p>${esc(cls.desc)}</p>
+    ${infoRows([
+      ['Dé de vie', `d${cls.hd} (PV au niveau 1 : ${cls.hd} + mod. CON ; ensuite ${cls.hd / 2 + 1} + mod. CON par niveau)`],
+      ['Caractéristique principale', cls.primary !== '—' ? esc(cls.primary) : ''],
+      ['Jets de sauvegarde', cls.saves.length ? cls.saves.map(a => byId(ABILITIES, a).name).join(', ') : 'à définir sur la fiche'],
+      ['Compétences', `${cls.skillCount} au choix parmi : ${cls.skills.length === SKILLS.length ? 'toutes' : cls.skills.map(skillName).join(', ')}`],
+      ['Armures', esc(cls.armor)],
+      ['Armes', esc(cls.weapons)],
+      ['Outils', esc(cls.tools)],
+      ['Magie', cls.caster ? `${casterLabel[cls.caster]}${cls.spellAb ? ` (${byId(ABILITIES, cls.spellAb).name})` : ''}` : cls.spellAb ? `DD basé sur ${byId(ABILITIES, cls.spellAb).name}` : 'Aucune'],
+    ])}
+    <h4>Capacités de niveau 1</h4>
+    ${CLASS_FEATURE_INFO[id] ? infoList(CLASS_FEATURE_INFO[id]) : `<p>${esc(cls.features || 'À recopier depuis ton livre.')}</p>`}
+    ${subs.length ? `<h4>Sous-classes (niveau 3)</h4>${subs.map(([src, items]) =>
+      `<p class="small"><b>${esc(SOURCES[src])} :</b> ${items.map(x => esc(x.name)).join(', ')}</p>`).join('')}` : ''}`];
+}
+
+function speciesInfo(id) {
+  const sp = byId(SPECIES, id);
+  if (!sp) return null;
+  const traits = SPECIES_INFO[id];
+  return [sp.name, `
+    ${srcLine(sp.source)}
+    ${infoRows([
+      ['Taille', sp.size !== '—' ? esc(sp.size) : ''],
+      ['Vitesse', `${String(sp.speed).replace('.', ',')} m`],
+      ['Vision dans le noir', sp.darkvision ? `${sp.darkvision} m` : ''],
+      [sp.lineageLabel ?? 'Lignages', sp.lineages ? esc(sp.lineages.join(', ')) : ''],
+    ])}
+    ${traits ? `<h4>Traits</h4>${infoList(traits)}`
+      : id === 'custom' ? '<p>Renseigne le nom de ton espèce, puis recopie ses traits dans « Capacités, traits &amp; dons » sur la fiche.</p>'
+      : `<p>Les traits de cette espèce ne sont pas repris ici (texte protégé). Recopie-les depuis <i>${esc(SOURCES[sp.source])}</i> dans « Capacités, traits &amp; dons » sur ta fiche, et ajuste la vitesse si besoin.</p>`}
+    <p class="small muted">En 2024, l'espèce ne donne pas de bonus de caractéristiques : ils viennent de l'historique.</p>`];
+}
+
+function backgroundInfo(id) {
+  const bg = byId(BACKGROUNDS, id);
+  if (!bg) return null;
+  return [bg.name, `
+    ${infoRows([
+      ['Caractéristiques', `${bg.abilities.map(a => byId(ABILITIES, a).name).join(', ')} : +2 / +1 ou +1 / +1 / +1`],
+      ['Don d\'origine', `<b>${esc(FEATS[bg.feat])}</b> — ${esc(FEAT_INFO[bg.feat])}`],
+      ['Compétences', bg.skills.map(skillName).join(', ')],
+      ['Outil', esc(bg.tool)],
+    ])}
+    <p class="small muted">L'historique donne aussi de l'équipement de départ (ou 50 po), à voir dans le Manuel des joueurs.</p>`];
+}
+
+function infoContent(key) {
+  const [type, id] = key.split(':');
+  switch (type) {
+    case 'class': return classInfo(id);
+    case 'species': return speciesInfo(id);
+    case 'bg': return backgroundInfo(id);
+    case 'feat': return FEATS[id] ? [FEATS[id], `<p>${esc(FEAT_INFO[id])}</p><p class="small muted">Don d'origine (niveau 1).</p>`] : null;
+    case 'skill': {
+      const sk = byId(SKILLS, id);
+      return sk && [sk.name, `<p class="info-src">Caractéristique : ${byId(ABILITIES, sk.ab).name}</p><p>${esc(SKILL_INFO[id])}</p>`];
+    }
+    case 'ability': {
+      const ab = byId(ABILITIES, id);
+      return ab && [ab.name, `<p>${esc(ABILITY_INFO[id])}</p>
+        <p class="small muted">Modificateur = (valeur − 10) ÷ 2, arrondi à l'inférieur. Compétences : ${SKILLS.filter(x => x.ab === id).map(x => x.name).join(', ') || 'aucune'}.</p>`];
+    }
+    case 'stat': return STAT_INFO[id] && [STAT_INFO[id][0], `<p>${esc(STAT_INFO[id][1])}</p>`];
+    case 'cond': return CONDITION_INFO[id] && [id, `<p>${esc(CONDITION_INFO[id])}</p>`];
+    case 'conds': return ['États', infoList(Object.entries(CONDITION_INFO))];
+    case 'subclass': {
+      const c = infoCharacter;
+      const cls = c && R.classOf(c);
+      const src = cls?.subclassSources?.[c.subclass];
+      return [c?.subclass || 'Sous-classe', `${src ? srcLine(src) : ''}<p>${esc(STAT_INFO.subclass[1])}</p>
+        ${src && src !== 'phb' ? '<p class="small muted">Capacités à recopier depuis le livre dans « Capacités, traits &amp; dons ».</p>' : ''}`];
+    }
+  }
+  return null;
+}
+
+function openInfo(key) {
+  const content = infoContent(key);
+  if (!content) return;
+  let dlg = document.getElementById('info-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'info-dialog';
+    dlg.addEventListener('click', e => {
+      if (e.target === dlg || e.target.closest('[data-close]')) dlg.close();
+    });
+    document.body.append(dlg);
+  }
+  dlg.innerHTML = `<div class="info-body">
+    <header><h2>${esc(content[0])}</h2><button type="button" class="icon" data-close aria-label="Fermer">✕</button></header>
+    ${content[1]}
+  </div>`;
+  dlg.showModal();
+}
+
+// En phase de capture : l'icône ne déclenche pas le clic de la carte qui la contient.
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-info]');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openInfo(btn.dataset.info);
+}, true);
 
 function portrait(c, cls = '') {
   const url = /^https?:\/\//.test(c.portrait || '') ? c.portrait : '';
@@ -242,7 +375,7 @@ function partyCard(c) {
       <div><b>${R.passive(c, 'perception')}</b><span>Perc. passive</span></div>
       <div><b>${sp ? sp.dc : '—'}</b><span>DD sorts</span></div>
     </div>
-    ${(c.conditions ?? []).length ? `<div class="conds">${c.conditions.map(x => `<span class="badge warn">${esc(x)}</span>`).join('')}</div>` : ''}
+    ${(c.conditions ?? []).length ? `<div class="conds">${c.conditions.map(x => `<span class="badge warn" title="${esc(CONDITION_INFO[x] ?? '')}">${esc(x)}</span>`).join('')}</div>` : ''}
   </a>`;
 }
 
@@ -365,10 +498,11 @@ function wizardView() {
         ${i !== w.step && reachable(i) ? '' : 'disabled'} ${i === w.step ? 'aria-current="step"' : ''}>${i + 1}. ${s}</button>
     </li>`).join('')}</ol>`;
 
+  const infoKey = { classId: 'class', speciesId: 'species', backgroundId: 'bg' };
   const optionCard = (field, o, body) => `
-    <button class="card option${w[field] === o.id ? ' selected' : ''}" data-pick="${field}" data-val="${o.id}">
-      <h3>${esc(o.name)}</h3>${body}
-    </button>`;
+    <div class="card option${w[field] === o.id ? ' selected' : ''}" role="button" tabindex="0" aria-pressed="${w[field] === o.id}" data-pick="${field}" data-val="${o.id}">
+      <div class="option-head"><h3>${esc(o.name)}</h3>${infoBtn(`${infoKey[field]}:${o.id}`, o.name)}</div>${body}
+    </div>`;
 
   // Filtre par livre + cartes groupées par livre.
   const sourcePicker = list => {
@@ -386,7 +520,7 @@ function wizardView() {
   const verifyBadge = '<span class="badge warn" title="Données non confirmées : à ajuster sur la fiche">à vérifier</span>';
 
   const steps = [
-    () => `<div class="row spread"><p class="muted">Choisis la classe de ton personnage.</p>${sourcePicker(CLASSES)}</div>
+    () => `<p class="muted">Choisis la classe de ton personnage. L'icône <span class="info-btn static">i</span> donne le détail de chaque choix.</p>
       ${groupedCards(CLASSES, 'classId', c => `
         <p>${esc(c.desc)}</p>
         <div class="tags">
@@ -402,7 +536,7 @@ function wizardView() {
       </div>` : ''}
       ${cls()?.verify && w.classId !== 'custom' ? `<p class="notice wide">Les données de cette classe (dé de vie, jets de sauvegarde, compétences, magie) ne sont pas toutes confirmées. Vérifie-les dans ton livre et ajuste-les dans « Réglages de classe » sur la fiche.</p>` : ''}`,
 
-    () => `<div class="row spread"><p class="muted">Choisis l'espèce de ton personnage. En 5.5, l'espèce ne donne plus de bonus de caractéristiques : ceux-ci viennent de l'historique.</p>${sourcePicker(SPECIES)}</div>
+    () => `<p class="muted">Choisis l'espèce de ton personnage. En 5.5, l'espèce ne donne plus de bonus de caractéristiques : ceux-ci viennent de l'historique.</p>
       ${groupedCards(SPECIES, 'speciesId', s => `
         <div class="tags">${s.size !== '—' ? `<span class="badge">Taille ${esc(s.size)}</span>` : ''}<span class="badge">${String(s.speed).replace('.', ',')} m</span></div>
         <p class="small">${esc(s.traits || s.desc || '')}</p>`)}
@@ -410,7 +544,7 @@ function wizardView() {
         <label>Nom de l'espèce<input data-w="customSpeciesName" value="${esc(w.customSpeciesName)}" maxlength="40"></label>
       </div>` : ''}
       ${sp()?.lineages ? `<div class="card sub-choice">
-        <label>${esc(sp().lineageLabel)}
+        <label><span>${esc(sp().lineageLabel)} ${infoBtn(`species:${w.speciesId}`, sp().name)}</span>
           <select data-w="lineage"><option value="">— Choisir —</option>
             ${sp().lineages.map(l => `<option ${w.lineage === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}
           </select></label></div>` : ''}`,
@@ -418,11 +552,11 @@ function wizardView() {
     () => `<p class="muted">L'historique donne les bonus de caractéristiques, un don d'origine, deux compétences et un outil.</p>
       <div class="grid options">${BACKGROUNDS.map(b => optionCard('backgroundId', b, `
         <div class="tags">${b.abilities.map(a => `<span class="badge">${R.abilityShort(a)}</span>`).join('')}</div>
-        <p class="small"><b>Don :</b> ${esc(FEATS[b.feat])}<br>
+        <p class="small"><b>Don :</b> ${esc(FEATS[b.feat])} ${infoBtn(`feat:${b.feat}`, FEATS[b.feat])}<br>
         <b>Compétences :</b> ${b.skills.map(s => byId(SKILLS, s).name).join(', ')}<br>
         <b>Outil :</b> ${esc(b.tool)}</p>`)).join('')}</div>
       ${bg() ? `<div class="card sub-choice">
-        <h3>Bonus de caractéristiques (${bg().abilities.map(R.abilityShort).join(', ')})</h3>
+        <h3>Bonus de caractéristiques (${bg().abilities.map(R.abilityShort).join(', ')}) ${infoBtn('stat:bgbonus')}</h3>
         <div class="seg">
           <button data-a="bgmode" data-v="21" class="${w.bgMode === '21' ? 'active' : ''}">+2 / +1</button>
           <button data-a="bgmode" data-v="111" class="${w.bgMode === '111' ? 'active' : ''}">+1 / +1 / +1</button>
@@ -436,7 +570,7 @@ function wizardView() {
     () => {
       const bonus = bgBonus();
       const spent = pbSpent();
-      return `<div class="seg">
+      return `<div class="seg">${infoBtn('stat:methods', 'méthodes')}
           <button data-a="method" data-v="standard" class="${w.method === 'standard' ? 'active' : ''}">Tableau standard</button>
           <button data-a="method" data-v="pointbuy" class="${w.method === 'pointbuy' ? 'active' : ''}">Achat de points</button>
           <button data-a="method" data-v="manual" class="${w.method === 'manual' ? 'active' : ''}">Manuel / dés</button>
@@ -464,7 +598,7 @@ function wizardView() {
               input = `<input type="number" min="3" max="20" value="${v}" data-man="${a.id}">`;
             }
             const prim = order()[0] === a.id ? ' <span class="badge magic">principale</span>' : '';
-            return `<tr><td>${a.name}${prim}</td><td>${input}</td><td>${bonus[a.id] ? `+${bonus[a.id]}` : '—'}</td>
+            return `<tr><td>${a.name} ${infoBtn(`ability:${a.id}`, a.name)}${prim}</td><td>${input}</td><td>${bonus[a.id] ? `+${bonus[a.id]}` : '—'}</td>
               <td><b>${total}</b></td><td>${R.fmt(R.mod(total))}</td></tr>`;
           }).join('')}</tbody>
         </table>`;
@@ -477,7 +611,7 @@ function wizardView() {
       const n = w.classSkills.length;
       return `<div class="card sub-choice">
           <h3>Historique (${esc(bg().name)})</h3>
-          <p>${bg().skills.map(x => `<span class="badge ok">✓ ${byId(SKILLS, x).name}</span>`).join(' ')}</p>
+          <p>${bg().skills.map(x => `<span class="badge ok">✓ ${byId(SKILLS, x).name}</span> ${infoBtn(`skill:${x}`, byId(SKILLS, x).name)}`).join(' ')}</p>
         </div>
         <div class="card sub-choice">
           <h3>Classe (${esc(c.name)}) — choisis ${c.skillCount} compétence${c.skillCount > 1 ? 's' : ''} <span class="muted">(${n}/${c.skillCount})</span></h3>
@@ -486,13 +620,13 @@ function wizardView() {
             const already = owned.has(id);
             const on = w.classSkills.includes(id);
             return `<label class="check ${already ? 'locked' : ''}"><input type="checkbox" data-cs="${id}" ${on || already ? 'checked' : ''}
-              ${already || (!on && n >= c.skillCount) ? 'disabled' : ''}> ${sk.name} <small>(${R.abilityShort(sk.ab)})</small></label>`;
+              ${already || (!on && n >= c.skillCount) ? 'disabled' : ''}> ${sk.name} <small>(${R.abilityShort(sk.ab)})</small> ${infoBtn(`skill:${id}`, sk.name)}</label>`;
           }).join('')}</div>
         </div>
         ${s.keenSenses ? `<div class="card sub-choice"><h3>Sens aiguisés (elfe) — 1 compétence</h3>
           <div class="checks">${s.keenSenses.map(id => {
             const taken = owned.has(id) || w.classSkills.includes(id);
-            return `<label class="check"><input type="radio" name="keen" data-keen="${id}" ${w.keenSense === id ? 'checked' : ''} ${taken ? 'disabled' : ''}> ${byId(SKILLS, id).name}</label>`;
+            return `<label class="check"><input type="radio" name="keen" data-keen="${id}" ${w.keenSense === id ? 'checked' : ''} ${taken ? 'disabled' : ''}> ${byId(SKILLS, id).name} ${infoBtn(`skill:${id}`, byId(SKILLS, id).name)}</label>`;
           }).join('')}</div></div>` : ''}
         ${s.skillful ? `<div class="card sub-choice"><h3>Talentueux (humain) — 1 compétence au choix</h3>
           <select data-skillful><option value="">— Choisir —</option>${SKILLS.filter(x => !owned.has(x.id) && !w.classSkills.includes(x.id)).map(x =>
@@ -514,7 +648,7 @@ function wizardView() {
           <h3>Récapitulatif</h3>
           ${(() => {
             const preview = R.buildCharacter({ ...w, name: w.name || '?', bgBonus: bgBonus(), extraSkills: extraSkills() });
-            return `<p><b>${esc(R.classOf(preview).name)}</b> · ${esc(R.speciesName(preview))}${w.lineage ? ` (${esc(w.lineage)})` : ''} · ${esc(bg().name)}</p>
+            return `<p><b>${esc(R.classOf(preview).name)}</b> ${infoBtn(`class:${w.classId}`)} · ${esc(R.speciesName(preview))}${w.lineage ? ` (${esc(w.lineage)})` : ''} ${infoBtn(`species:${w.speciesId}`)} · ${esc(bg().name)} ${infoBtn(`bg:${w.backgroundId}`)}</p>
               <div class="mini-stats">
                 <div><b>${preview.hp.max}</b><span>PV max</span></div>
                 <div><b>${preview.ac}</b><span>CA</span></div>
@@ -523,7 +657,7 @@ function wizardView() {
               </div>
               <div class="mini-abils">${ABILITIES.map(a => `<div><span>${a.short}</span><b>${R.score(preview, a.id)}</b><small>${R.fmt(R.abilityMod(preview, a.id))}</small></div>`).join('')}</div>
               <p class="small"><b>Compétences :</b> ${Object.keys(preview.skills).map(s => byId(SKILLS, s).name).join(', ')}</p>
-              <p class="small"><b>Don d'origine :</b> ${esc(FEATS[bg().feat])}</p>`;
+              <p class="small"><b>Don d'origine :</b> ${esc(FEATS[bg().feat])} ${infoBtn(`feat:${bg().feat}`)}</p>`;
           })()}
         </div>
       </div>`,
@@ -532,7 +666,10 @@ function wizardView() {
   function render() {
     root.innerHTML = `
       <div class="page-head"><h1>Nouveau personnage</h1></div>
-      ${stepperBar()}
+      <div class="wizard-top">
+        ${stepperBar()}
+        ${w.step === 0 ? sourcePicker(CLASSES) : w.step === 1 ? sourcePicker(SPECIES) : ''}
+      </div>
       <section class="wizard-body">${steps[w.step]()}</section>
       <div class="wizard-nav">
         <button class="btn ghost" data-a="prev" ${w.step === 0 ? 'disabled' : ''}>← Retour</button>
@@ -633,6 +770,15 @@ function wizardView() {
     render();
   });
 
+  // Les cartes sont des <div role="button"> : Entrée et Espace les sélectionnent.
+  root.addEventListener('keydown', e => {
+    const card = e.target.closest?.('[data-pick]');
+    if (card && e.target === card && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      card.click();
+    }
+  });
+
   root.addEventListener('input', e => {
     if (['name', 'customClassName', 'customSpeciesName'].includes(e.target.dataset.w)) {
       w[e.target.dataset.w] = e.target.value;
@@ -696,7 +842,7 @@ function sheetView(id) {
     setStatus('Modifications non enregistrées…');
     saveTimer = setTimeout(saveNow, delay);
   }
-  teardown.push(() => { if (saveTimer) saveNow(); });
+  teardown.push(() => { if (saveTimer) saveNow(); infoCharacter = null; });
 
   function derived() {
     const d = {};
@@ -740,16 +886,16 @@ function sheetView(id) {
         <input class="char-name" data-p="name" value="${esc(c.name)}" ${dis()} aria-label="Nom du personnage">
         <div class="muted"><span data-d="label"></span>${c.subclass ? ` — ${esc(c.subclass)}` : ''} · joué par ${esc(c.ownerName)}</div>
         <div class="sh-fields">
-          <label>Classe ${selGrouped('classId', CLASSES)}</label>
+          <label><span class="lbl-row">Classe ${infoBtn(`class:${c.classId}`)}</span>${selGrouped('classId', CLASSES)}</label>
           ${c.classId === 'custom' ? `<label>Nom de la classe ${inp('customClassName')}</label>` : ''}
-          <label>Sous-classe <input data-p="subclass" list="subclasses" value="${esc(c.subclass)}" ${dis()} placeholder="${c.level >= 3 ? 'Niveau 3+' : 'Au niveau 3'}">
+          <label><span class="lbl-row">Sous-classe ${infoBtn('subclass')}</span><input data-p="subclass" list="subclasses" value="${esc(c.subclass)}" ${dis()} placeholder="${c.level >= 3 ? 'Niveau 3+' : 'Au niveau 3'}">
             <datalist id="subclasses">${(cls?.subclasses ?? []).map(s =>
               `<option value="${esc(s)}" label="${esc(SOURCES[cls.subclassSources?.[s]] ?? '')}">`).join('')}</datalist></label>
           <label>Niveau ${inp('level', { type: 'number', attrs: 'min="1" max="20" data-r' })}</label>
-          <label>Espèce ${selGrouped('speciesId', SPECIES)}</label>
+          <label><span class="lbl-row">Espèce ${infoBtn(`species:${c.speciesId}`)}</span>${selGrouped('speciesId', SPECIES)}</label>
           ${c.speciesId === 'custom' ? `<label>Nom de l'espèce ${inp('customSpeciesName')}</label>` : ''}
           ${sp?.lineages ? `<label>${esc(sp.lineageLabel)} ${sel('lineage', sp.lineages.map(l => [l, l]), { rerender: false })}</label>` : ''}
-          <label>Historique ${sel('backgroundId', BACKGROUNDS.map(x => [x.id, x.name]), { empty: false })}</label>
+          <label><span class="lbl-row">Historique ${infoBtn(`bg:${c.backgroundId}`)}</span>${sel('backgroundId', BACKGROUNDS.map(x => [x.id, x.name]), { empty: false })}</label>
           <label>Alignement ${sel('alignment', ALIGNMENTS.map(a => [a, a]), { rerender: false })}</label>
           <label>XP ${inp('xp', { type: 'number', attrs: 'min="0"' })}</label>
         </div>
@@ -766,28 +912,28 @@ function sheetView(id) {
 
   function topStats() {
     return `<div class="top-stats">
-      <div class="stat card"><span class="lbl">Classe d'armure</span>${inp('ac', { type: 'number', cls: 'big' })}
+      <div class="stat card"><span class="lbl">Classe d'armure ${infoBtn('stat:ac')}</span>${inp('ac', { type: 'number', cls: 'big' })}
         ${canEdit ? `<button class="hint" data-a="ac-sug" title="Sans armure">suggestion : <b data-d="ac-sug"></b></button>` : ''}</div>
-      <div class="stat card"><span class="lbl">Initiative</span><b class="big" data-d="init"></b>
+      <div class="stat card"><span class="lbl">Initiative ${infoBtn('stat:init')}</span><b class="big" data-d="init"></b>
         ${canEdit ? `<label class="hint">divers ${inp('initMisc', { type: 'number', cls: 'tiny' })}</label>` : ''}</div>
-      <div class="stat card"><span class="lbl">Vitesse (m)</span>${inp('speed', { type: 'number', cls: 'big', attrs: 'step="1.5" min="0"' })}</div>
-      <div class="stat card"><span class="lbl">Bonus de maîtrise</span><b class="big" data-d="prof"></b></div>
-      <div class="stat card"><span class="lbl">Perception passive</span><b class="big" data-d="pp"></b>
+      <div class="stat card"><span class="lbl">Vitesse (m) ${infoBtn('stat:speed')}</span>${inp('speed', { type: 'number', cls: 'big', attrs: 'step="1.5" min="0"' })}</div>
+      <div class="stat card"><span class="lbl">Bonus de maîtrise ${infoBtn('stat:prof')}</span><b class="big" data-d="prof"></b></div>
+      <div class="stat card"><span class="lbl">Perception passive ${infoBtn('stat:passive')}</span><b class="big" data-d="pp"></b>
         <span class="hint">Intu. <b data-d="pi"></b> · Inv. <b data-d="pinv"></b></span></div>
-      <div class="stat card"><span class="lbl">Inspiration héroïque</span>
+      <div class="stat card"><span class="lbl">Inspiration héroïque ${infoBtn('stat:inspiration')}</span>
         <button class="insp-toggle ${c.inspiration ? 'on' : ''}" data-a="insp" ${dis()}>★</button></div>
     </div>`;
   }
 
   function abilitiesBlock() {
     return `<section class="card">
-      <h2>Caractéristiques</h2>
+      <h2>Caractéristiques ${infoBtn('stat:saves', 'jets de sauvegarde')}</h2>
       <div class="abilities">${ABILITIES.map(a => {
         const prof = R.saveProficient(c, a.id);
         const classSave = R.classOf(c)?.saves.includes(a.id);
         const bonusTxt = [c.bgBonus?.[a.id] ? `historique +${c.bgBonus[a.id]}` : '', c.otherBonus?.[a.id] ? `autres ${R.fmt(c.otherBonus[a.id])}` : ''].filter(Boolean).join(', ');
         return `<div class="ability">
-          <span class="lbl" title="${a.name}">${a.short}</span>
+          <span class="lbl" title="${a.name}">${a.short} ${infoBtn(`ability:${a.id}`, a.name)}</span>
           <b class="mod" data-d="mod-${a.id}"></b>
           <input type="number" class="score" data-score="${a.id}" value="${R.score(c, a.id)}" min="1" max="30" ${dis()} title="${esc(bonusTxt || a.name)}">
           <button class="save ${prof ? 'on' : ''}" data-a="save" data-k="${a.id}" ${classSave || !canEdit ? 'disabled' : ''} title="Jet de sauvegarde${classSave ? ' (classe)' : ''}">
@@ -799,12 +945,12 @@ function sheetView(id) {
 
   function skillsBlock() {
     return `<section class="card">
-      <h2>Compétences <small class="muted">${canEdit ? 'clic : maîtrise → expertise' : ''}</small></h2>
+      <h2>Compétences ${infoBtn('stat:skills')} <small class="muted">${canEdit ? 'clic : maîtrise → expertise' : ''}</small></h2>
       <ul class="skills">${SKILLS.map(s => {
         const lvl = c.skills?.[s.id] ?? 0;
         return `<li><button class="prof p${lvl}" data-a="skill" data-k="${s.id}" ${dis()} title="${['Non maîtrisée', 'Maîtrise', 'Expertise'][lvl]}"></button>
           <span class="sk-bonus" data-d="skill-${s.id}"></span>
-          <span>${s.name}</span><small class="muted">${R.abilityShort(s.ab)}</small></li>`;
+          <span>${s.name}</span> ${infoBtn(`skill:${s.id}`, s.name)}<small class="muted">${R.abilityShort(s.ab)}</small></li>`;
       }).join('')}</ul>
     </section>`;
   }
@@ -812,7 +958,7 @@ function sheetView(id) {
   function hpBlock() {
     const ds = c.deathSaves ?? { success: 0, fail: 0 };
     return `<section class="card hp-card">
-      <h2>Points de vie</h2>
+      <h2>Points de vie ${infoBtn('stat:hp')}</h2>
       ${hpBar(c)}
       <div class="hp-fields">
         <label>Actuels ${inp('hp.current', { type: 'number', cls: 'big' })}</label>
@@ -826,19 +972,19 @@ function sheetView(id) {
         <button class="hint" data-a="hp-sug">PV max suggérés : <b data-d="hp-sug"></b></button>
       </div>` : ''}
       <div class="row spread">
-        <div><span class="lbl">Dés de vie</span> <b data-d="hd"></b>
+        <div><span class="lbl">Dés de vie ${infoBtn('stat:hitdice')}</span> <b data-d="hd"></b>
           ${canEdit ? `<label class="hint">utilisés ${inp('hitDiceUsed', { type: 'number', cls: 'tiny', attrs: 'min="0"' })}</label>` : ''}</div>
         <div class="death">
-          <span class="lbl">Jets contre la mort</span>
+          <span class="lbl">Jets contre la mort ${infoBtn('stat:death')}</span>
           <div>✓ ${pips(3, ds.success, 'death', 'data-k="success"')}</div>
           <div>✗ ${pips(3, ds.fail, 'death', 'data-k="fail"')}</div>
         </div>
       </div>
       <div class="conditions">
-        <span class="lbl">États</span>
+        <span class="lbl">États ${infoBtn('conds', 'tous les états')}</span>
         <div class="chips">${CONDITIONS.map(x => {
           const on = (c.conditions ?? []).includes(x);
-          return canEdit || on ? `<button class="chip ${on ? 'on' : ''}" data-a="cond" data-k="${esc(x)}" ${dis()}>${esc(x)}</button>` : '';
+          return canEdit || on ? `<button class="chip ${on ? 'on' : ''}" data-a="cond" data-k="${esc(x)}" title="${esc(CONDITION_INFO[x])}" ${dis()}>${esc(x)}</button>` : '';
         }).join('') || '<span class="muted small">Aucun</span>'}</div>
       </div>
     </section>`;
@@ -847,7 +993,7 @@ function sheetView(id) {
   function attacksBlock() {
     const list = c.attacks ?? [];
     return `<section class="card">
-      <h2>Attaques</h2>
+      <h2>Attaques ${infoBtn('stat:attacks')}</h2>
       ${list.length ? `<table class="list-table"><thead><tr><th>Nom</th><th>Bonus</th><th>Dégâts / type</th><th>Notes</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${list.map((_, i) => `<tr>
           <td>${inp(`attacks.${i}.name`)}</td><td>${inp(`attacks.${i}.bonus`, { cls: 'tiny' })}</td>
@@ -861,7 +1007,7 @@ function sheetView(id) {
   function resourcesBlock() {
     const list = c.resources ?? [];
     return `<section class="card">
-      <h2>Ressources de classe</h2>
+      <h2>Ressources de classe ${infoBtn('stat:resources')}</h2>
       ${list.length ? `<table class="list-table"><thead><tr><th>Nom</th><th>Restant</th><th>Max</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${list.map((_, i) => `<tr>
           <td>${inp(`resources.${i}.name`)}</td>
@@ -898,8 +1044,9 @@ function sheetView(id) {
 
   function featuresBlock() {
     return `${classSettingsBlock()}<section class="card">
-      <h2>Capacités, traits &amp; dons</h2>
-      <label>Don d'origine ${sel('originFeat', Object.entries(FEATS), { rerender: true })}</label>
+      <h2>Capacités, traits &amp; dons ${infoBtn(`class:${c.classId}`, 'capacités de classe')}</h2>
+      <label><span class="lbl-row">Don d'origine ${c.originFeat ? infoBtn(`feat:${c.originFeat}`) : ''}</span>${sel('originFeat', Object.entries(FEATS), { rerender: true })}</label>
+      <p class="small muted">Traits d'espèce ${infoBtn(`species:${c.speciesId}`, R.speciesName(c))} · capacités de classe ${infoBtn(`class:${c.classId}`, 'classe')}</p>
       ${area('features', 10, 'Capacités de classe, traits d\'espèce, dons…')}
     </section>
     <section class="card">
@@ -928,7 +1075,7 @@ function sheetView(id) {
         <div class="stat card"><span class="lbl">Caractéristique</span>
           ${sel('spellAb', ABILITIES.map(a => [a.id, a.name]), { rerender: true, emptyLabel: 'Selon la classe' })}
           <span class="hint">${cls?.spellAb ? `classe : ${byId(ABILITIES, cls.spellAb).name}` : 'classe non lanceuse'}</span></div>
-        <div class="stat card"><span class="lbl">DD de sauvegarde</span><b class="big" data-d="dc"></b></div>
+        <div class="stat card"><span class="lbl">DD de sauvegarde ${infoBtn('stat:spells')}</span><b class="big" data-d="dc"></b></div>
         <div class="stat card"><span class="lbl">Bonus d'attaque</span><b class="big" data-d="atk"></b></div>
       </div>
       <section class="card">
@@ -982,6 +1129,7 @@ function sheetView(id) {
   }
 
   function render() {
+    infoCharacter = c;
     const y = window.scrollY;
     const body = { combat: combatTab, spells: spellsTab, gear: gearTab, story: storyTab }[tab]();
     root.innerHTML = `${header()}
