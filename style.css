@@ -439,3 +439,12 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 /* Bascule mode joueur / MJ */
 .mode-toggle { white-space: nowrap; }
 .mode-toggle.player { border-color: var(--gold); color: var(--gold); }
+
+/* Suppression depuis la vue du groupe */
+.card-wrap { position: relative; display: flex; }
+.card-wrap > .char-card { flex: 1; }
+.card-del {
+  position: absolute; top: 8px; right: 8px; z-index: 2; width: 30px; height: 30px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); cursor: pointer; font-size: .9rem; opacity: .55;
+}
+.card-del:hover, .card-del:focus-visible { opacity: 1; border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }

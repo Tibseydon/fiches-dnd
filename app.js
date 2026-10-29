@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291554';
-import { CAMPAIGN_NAME } from './config.js?v=202610291554';
+import * as store from './store.js?v=202610291818';
+import { CAMPAIGN_NAME } from './config.js?v=202610291818';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610291554';
-import * as R from './rules.js?v=202610291554';
+} from './data.js?v=202610291818';
+import * as R from './rules.js?v=202610291818';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291554';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291554';
+} from './info.js?v=202610291818';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291818';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -416,17 +416,39 @@ function partyView() {
         </div>`}
       ${shown.length > 0 ? partyTable(shown) : ''}`;
     root.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { filter = b.dataset.f; render(list); });
+    root.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      const c = list.find(x => x.id === b.dataset.del);
+      if (c && canDelete(c)) { b.disabled = true; await deleteWithConfirm(c); b.disabled = false; }
+    });
   };
 
   let latest = [];
   teardown.push(store.watchCharacters((list, e) => { latest = list; render(latest, e); }));
 }
 
+// Suppression : le joueur qui a créé le personnage, ou le MJ (règle aussi appliquée par la base).
+const canDelete = c => c.ownerUid === me.uid || isGM();
+
+async function deleteWithConfirm(c) {
+  const whose = c.ownerUid === me.uid ? '' : ` (joué par ${c.ownerName})`;
+  if (!confirm(`Supprimer définitivement « ${c.name} »${whose} ?\n\nLa fiche sera effacée pour tout le groupe. Cette action est irréversible.`)) return false;
+  try {
+    await store.deleteCharacter(c.id);
+    toast(`« ${c.name} » a été supprimé.`);
+    return true;
+  } catch (e) {
+    toast(`Suppression impossible : ${e.message}`, 'error');
+    return false;
+  }
+}
+
 function partyCard(c) {
   const sp = R.spellInfo(c);
   const mine = c.ownerUid === me.uid;
   const sub = c.subclass ? ` — ${esc(subclassName(R.classOf(c), c.subclass))}` : '';
-  return `<a class="card char-card${mine ? ' mine' : ''}" href="#/perso/${esc(c.id)}">
+  return `<div class="card-wrap">
+  ${canDelete(c) ? `<button class="card-del" data-del="${esc(c.id)}" title="Supprimer ce personnage" aria-label="Supprimer ${esc(c.name)}">🗑</button>` : ''}
+  <a class="card char-card${mine ? ' mine' : ''}" href="#/perso/${esc(c.id)}">
     <div class="cc-head">
       ${portrait(c)}
       <div class="cc-title">
@@ -443,7 +465,8 @@ function partyCard(c) {
       <div><b>${sp ? sp.dc : '—'}</b><span>DD sorts</span></div>
     </div>
     ${(c.conditions ?? []).length ? `<div class="conds">${c.conditions.map(x => `<span class="badge warn" title="${esc(CONDITION_INFO[x] ?? '')}">${esc(x)}</span>`).join('')}</div>` : ''}
-  </a>`;
+  </a>
+  </div>`;
 }
 
 function partyTable(list) {
@@ -1576,7 +1599,7 @@ function sheetView(id) {
         <button class="btn ghost small" data-a="print">Imprimer</button>
         <button class="btn ghost small" data-a="export">Exporter</button>
         ${canEdit ? '<button class="btn ghost small" data-a="longrest" title="PV, emplacements et ressources restaurés">Repos long</button>' : ''}
-        ${c.ownerUid === me.uid || isGM() ? '<button class="btn danger small" data-a="delete">Supprimer</button>' : ''}
+        ${canDelete(c) ? '<button class="btn danger small" data-a="delete">Supprimer le personnage</button>' : ''}
       </div>
     </header>`;
   }
@@ -1946,12 +1969,12 @@ function sheetView(id) {
       }
       case 'shortrest': c.slotsUsed = Array(9).fill(0); toast('Emplacements de pacte récupérés.', 'ok'); break;
       case 'delete': {
-        if (!confirm(`Supprimer définitivement ${c.name} ?`)) return;
+        if (!canDelete(c)) return;
+        const pending = saveTimer;
         clearTimeout(saveTimer);
         saveTimer = null;
-        await store.deleteCharacter(id);
-        toast('Personnage supprimé.');
-        location.hash = '#/groupe';
+        if (await deleteWithConfirm({ ...c, id })) location.hash = '#/groupe';
+        else if (pending) save();
         return;
       }
       default: return;
