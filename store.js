@@ -1,5 +1,5 @@
 // Couche de stockage : Supabase (partagé) ou localStorage (mode test).
-import { SUPABASE_URL, SUPABASE_KEY } from './config.js?v=202610291001';
+import { SUPABASE_URL, SUPABASE_KEY } from './config.js?v=202610291009';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.76.1/+esm';
 
@@ -21,6 +21,11 @@ export const watchCharacter = (id, cb) => impl.watchCharacter(id, cb);
 export const createCharacter = data => impl.createCharacter(data);
 export const updateCharacter = (id, data) => impl.updateCharacter(id, data);
 export const deleteCharacter = id => impl.deleteCharacter(id);
+export const updateProfile = displayName => impl.updateProfile(displayName);
+export const getCampaign = () => impl.getCampaign();
+export const saveCampaign = settings => impl.saveCampaign(settings);
+
+export const DEFAULT_CAMPAIGN = { startLevel: 1 };
 
 // ── Supabase ────────────────────────────────────────────────
 
@@ -135,13 +140,28 @@ async function supabaseImpl() {
       const rows = check(await sb.from(T).delete().eq('id', id).select('id'));
       if (!rows.length) throw new Error('Accès refusé.');
     },
+    async updateProfile(displayName) {
+      const { data: { user } } = await sb.auth.getUser();
+      const rows = check(await sb.from('profiles').update({ display_name: displayName }).eq('id', user.id).select('id'));
+      if (!rows.length) throw new Error("Impossible de changer le pseudo (mise à jour SQL « maj-pseudo-campagne.sql » pas encore faite ?).");
+    },
+    async getCampaign() {
+      const { data, error } = await sb.from('campaign').select('settings').eq('id', 1).maybeSingle();
+      // Table absente (mise à jour SQL pas encore faite) : réglages par défaut.
+      if (error || !data) return { ...DEFAULT_CAMPAIGN };
+      return { ...DEFAULT_CAMPAIGN, ...data.settings };
+    },
+    async saveCampaign(settings) {
+      const rows = check(await sb.from('campaign').update({ settings, updated_at: new Date().toISOString() }).eq('id', 1).select('id'));
+      if (!rows.length) throw new Error("Seul le MJ peut modifier la campagne (ou la mise à jour SQL « maj-pseudo-campagne.sql » n'est pas faite).");
+    },
   };
 }
 
 // ── Mode local (localStorage) ───────────────────────────────
 
 function localImpl() {
-  const K = { users: 'dnd55.users', chars: 'dnd55.chars', session: 'dnd55.session' };
+  const K = { users: 'dnd55.users', chars: 'dnd55.chars', session: 'dnd55.session', campaign: 'dnd55.campaign' };
   const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
   const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
   const listeners = new Set();
@@ -229,6 +249,23 @@ function localImpl() {
       delete all[id];
       write(K.chars, all);
       notify();
+    },
+    async updateProfile(displayName) {
+      const users = read(K.users, {});
+      const u = users[read(K.session, null)];
+      if (!u) throw new Error('Non connecté.');
+      u.displayName = displayName;
+      write(K.users, users);
+      const all = read(K.chars, {});
+      Object.values(all).filter(c => c.ownerUid === u.uid).forEach(c => (c.ownerName = displayName));
+      write(K.chars, all);
+      notify();
+      emitAuth();
+    },
+    async getCampaign() { return { ...DEFAULT_CAMPAIGN, ...read(K.campaign, {}) }; },
+    async saveCampaign(settings) {
+      if (current()?.role !== 'mj') throw new Error('Seul le MJ peut modifier la campagne.');
+      write(K.campaign, settings);
     },
   };
 }

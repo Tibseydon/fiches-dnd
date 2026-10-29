@@ -396,3 +396,11 @@ details summary b { color: var(--ink); }
 .wizard-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
 .wizard-top .stepper-bar { margin: 0; }
 .wizard-top .source-filter { margin: 0; }
+
+/* Progression */
+.mini-abils .over { border-color: var(--danger); }
+.mini-abils .over b { color: var(--danger); }
+.info-list li.reached b { color: var(--ok); }
+#nav a.who { color: var(--muted); }
+#nav a.who.active, #nav a.who:hover { color: var(--accent); }
+.wizard-body .mini-abils { margin-top: 16px; }

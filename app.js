@@ -1,13 +1,14 @@
-import * as store from './store.js?v=202610291001';
-import { CAMPAIGN_NAME } from './config.js?v=202610291001';
+import * as store from './store.js?v=202610291009';
+import { CAMPAIGN_NAME } from './config.js?v=202610291009';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, byId,
-} from './data.js?v=202610291001';
-import * as R from './rules.js?v=202610291001';
+} from './data.js?v=202610291009';
+import * as R from './rules.js?v=202610291009';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291001';
+} from './info.js?v=202610291009';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291009';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -97,8 +98,11 @@ function classInfo(id) {
       ['Outils', esc(cls.tools)],
       ['Magie', cls.caster ? `${casterLabel[cls.caster]}${cls.spellAb ? ` (${byId(ABILITIES, cls.spellAb).name})` : ''}` : cls.spellAb ? `DD basé sur ${byId(ABILITIES, cls.spellAb).name}` : 'Aucune'],
     ])}
+    ${infoCharacter?.classId === id ? `<p class="small muted">Niveau actuel : ${infoCharacter.level}${scalingValues(id, infoCharacter.level).length ? ` · ${esc(scalingValues(id, infoCharacter.level).join(' · '))}` : ''}</p>` : ''}
     <h4>Capacités de niveau 1</h4>
     ${CLASS_FEATURE_INFO[id] ? infoList(CLASS_FEATURE_INFO[id]) : `<p>${esc(cls.features || 'À recopier depuis ton livre.')}</p>`}
+    ${featuresUpTo(id, 20).length ? `<h4>Progression</h4><ul class="info-list">${featuresUpTo(id, 20).map(([l, names]) =>
+      `<li class="${infoCharacter?.classId === id && l <= infoCharacter.level ? 'reached' : ''}"><b>Niv. ${l}</b> — ${esc(names.join(', '))}</li>`).join('')}</ul>` : ''}
     ${subs.length ? `<h4>Sous-classes (niveau 3)</h4>${subs.map(([src, items]) =>
       `<p class="small"><b>${esc(SOURCES[src])} :</b> ${items.map(x => esc(x.name)).join(', ')}</p>`).join('')}` : ''}`];
 }
@@ -219,7 +223,8 @@ function renderNav() {
   $nav.innerHTML = `
     <a href="#/groupe" class="${h.startsWith('#/groupe') || h === '' ? 'active' : ''}">Le groupe</a>
     <a href="#/nouveau" class="${h.startsWith('#/nouveau') ? 'active' : ''}">+ Nouveau personnage</a>
-    <span class="who">${esc(me.displayName)}${me.role === 'mj' ? ' <span class="badge gm">MJ</span>' : ''}</span>
+    ${me.role === 'mj' ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>` : ''}
+    <a href="#/profil" class="who ${h.startsWith('#/profil') ? 'active' : ''}" title="Mon profil">${esc(me.displayName)}${me.role === 'mj' ? ' <span class="badge gm">MJ</span>' : ''}</a>
     <button class="btn ghost small" id="logout">Déconnexion</button>`;
   $nav.querySelector('#logout').onclick = () => { location.hash = '#/groupe'; store.signOut(); };
 }
@@ -234,6 +239,8 @@ function route() {
   const m = h.match(/^#\/perso\/([\w-]+)/);
   if (m) return sheetView(m[1]);
   if (h.startsWith('#/nouveau')) return wizardView();
+  if (h.startsWith('#/profil')) return profileView();
+  if (h.startsWith('#/campagne')) return campaignView();
   partyView();
 }
 
@@ -415,6 +422,69 @@ function partyTable(list) {
   </section>`;
 }
 
+// ── Mon profil ──────────────────────────────────────────────
+
+function profileView() {
+  const root = mount(`<section class="card narrow">
+    <h1>Mon profil</h1>
+    <form id="profile">
+      <label>Pseudo (affiché au groupe et sur tes fiches)
+        <input name="displayName" value="${esc(me.displayName)}" required maxlength="40" autocomplete="nickname"></label>
+      <p class="small muted">E-mail : ${esc(me.email ?? '')} · Rôle : ${me.role === 'mj' ? 'MJ' : 'joueur'}</p>
+      <button class="btn primary">Enregistrer</button>
+      <p class="error" id="err"></p>
+    </form>
+  </section>`);
+  root.querySelector('#profile').onsubmit = async e => {
+    e.preventDefault();
+    const name = new FormData(e.target).get('displayName').trim();
+    const err = root.querySelector('#err');
+    err.textContent = '';
+    if (!name) { err.textContent = 'Le pseudo ne peut pas être vide.'; return; }
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      await store.updateProfile(name);
+      me.displayName = name;
+      renderNav();
+      toast('Pseudo mis à jour.', 'ok');
+    } catch (ex) { err.textContent = ex.message; } finally { btn.disabled = false; }
+  };
+}
+
+// ── Réglages de la campagne (MJ) ────────────────────────────
+
+function campaignView() {
+  const root = mount('<div class="loading">Chargement…</div>');
+  const gm = me.role === 'mj';
+  store.getCampaign().then(cfg => {
+    root.innerHTML = `<section class="card narrow">
+      <h1>Campagne</h1>
+      <form id="campaign">
+        <label>Niveau de départ des personnages
+          <select name="startLevel" ${gm ? '' : 'disabled'}>${Array.from({ length: 20 }, (_, i) =>
+            `<option value="${i + 1}" ${cfg.startLevel === i + 1 ? 'selected' : ''}>Niveau ${i + 1}</option>`).join('')}</select></label>
+        <p class="small muted">Les nouveaux personnages sont créés directement à ce niveau : PV, bonus de maîtrise, emplacements de sorts,
+          ressources et capacités de classe sont calculés automatiquement. Le joueur choisit lui-même sa sous-classe
+          (dès le niveau ${SUBCLASS_LEVEL}), ses améliorations de caractéristiques ou dons, puis ses sorts et autres options sur sa fiche.
+          Les personnages déjà créés ne changent pas.</p>
+        ${gm ? '<button class="btn primary">Enregistrer</button>' : '<p class="notice wide">Seul le MJ peut modifier ces réglages.</p>'}
+        <p class="error" id="err"></p>
+      </form>
+    </section>`;
+    const form = root.querySelector('#campaign');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const err = root.querySelector('#err');
+      err.textContent = '';
+      try {
+        await store.saveCampaign({ ...cfg, startLevel: Number(new FormData(form).get('startLevel')) });
+        toast('Réglages de campagne enregistrés.', 'ok');
+      } catch (ex) { err.textContent = ex.message; }
+    };
+  });
+}
+
 // ── Assistant de création ──────────────────────────────────
 
 const PRIORITY = {
@@ -432,7 +502,7 @@ const PRIORITY = {
   wizard: ['int', 'con', 'dex', 'wis', 'cha', 'str'],
 };
 
-const STEPS = ['Classe', 'Espèce', 'Historique', 'Caractéristiques', 'Compétences', 'Finalisation'];
+const STEPS = ['Classe', 'Espèce', 'Historique', 'Caractéristiques', 'Compétences', 'Niveau', 'Finalisation'];
 
 function wizardView() {
   const w = {
@@ -442,6 +512,7 @@ function wizardView() {
     classSkills: [], keenSense: '', skillful: '',
     name: '', level: 1, alignment: '', portrait: '', personality: '', backstory: '',
     customClassName: '', customSpeciesName: '', source: 'all',
+    subclass: '', levelChoices: [],
   };
   const root = mount('');
 
@@ -469,6 +540,24 @@ function wizardView() {
   const ownedSkills = () => new Set([...(bg()?.skills ?? [])]);
   const extraSkills = () => [w.keenSense, w.skillful].filter(Boolean);
 
+  // Choix liés au niveau de départ : une entrée par amélioration de caractéristiques (+ don épique).
+  const syncChoices = () => {
+    if (!w.classId) return;
+    const levels = [...asiLevels(w.classId, w.level), ...(w.level >= EPIC_BOON_LEVEL ? [EPIC_BOON_LEVEL] : [])];
+    const [a, b] = order();
+    w.levelChoices = levels.map(l => w.levelChoices.find(ch => ch.level === l)
+      ?? (l === EPIC_BOON_LEVEL ? { level: l, kind: 'boon', feat: '' } : { level: l, kind: 'asi', mode: '2', a, b, feat: '' }));
+  };
+  const totals = () => {
+    const bg = bgBonus();
+    const ch = R.choiceBonus(w.levelChoices);
+    return Object.fromEntries(ABILITIES.map(x => [x.id, w.base[x.id] + (bg[x.id] ?? 0) + (ch[x.id] ?? 0)]));
+  };
+  const needsSubclass = () => w.level >= SUBCLASS_LEVEL && (cls()?.subclasses.length ?? 0) > 0;
+  const choicesValid = () => w.levelChoices.every(ch =>
+    ch.kind === 'asi' ? !!ch.a && (ch.mode === '2' || (!!ch.b && ch.b !== ch.a)) : !!ch.feat?.trim())
+    && Object.values(totals()).every(v => v <= 20);
+
   function valid(step = w.step) {
     switch (step) {
       case 0: return !!w.classId && (w.classId !== 'custom' || !!w.customClassName.trim());
@@ -478,7 +567,8 @@ function wizardView() {
       case 3: return w.method !== 'pointbuy' || pbSpent() <= POINT_BUY_BUDGET;
       case 4: return w.classSkills.length === cls().skillCount
         && (!sp().keenSenses || !!w.keenSense) && (!sp().skillful || !!w.skillful);
-      case 5: return !!w.name.trim();
+      case 5: return (!needsSubclass() || !!w.subclass) && choicesValid();
+      case 6: return !!w.name.trim();
     }
     return true;
   }
@@ -633,11 +723,63 @@ function wizardView() {
             `<option value="${x.id}" ${w.skillful === x.id ? 'selected' : ''}>${x.name}</option>`).join('')}</select></div>` : ''}`;
     },
 
+    () => {
+      const c = cls();
+      const t = totals();
+      const feats = featuresUpTo(c.id, w.level);
+      const vals = scalingValues(c.id, w.level);
+      const subs = bySource(c.subclasses.map(n => ({ id: n, name: n, source: c.subclassSources?.[n] ?? c.source })));
+      return `<p class="muted">Ton MJ a fixé le niveau de départ à <b>${w.level}</b>. PV, bonus de maîtrise (${R.fmt(R.profBonus(w.level))}),
+          emplacements de sorts et ressources sont calculés pour ce niveau ; il te reste à faire les choix ci-dessous.</p>
+        <div class="card sub-choice">
+          <h3>Capacités de ${esc(c.name)} jusqu'au niveau ${w.level} ${infoBtn(`class:${c.id}`, c.name)}</h3>
+          <p class="small"><b>Niv. 1 :</b> ${esc(c.features || '—')}</p>
+          ${feats.map(([l, names]) => `<p class="small"><b>Niv. ${l} :</b> ${esc(names.join(', '))}</p>`).join('')}
+          ${vals.length ? `<p class="small"><b>Au niveau ${w.level} :</b> ${esc(vals.join(' · '))}</p>` : ''}
+          ${c.source !== 'phb' ? `<p class="small muted">Classe d'extension : vérifie sa progression dans ${esc(SOURCES[c.source] ?? 'ton livre')}.</p>` : ''}
+        </div>
+        ${needsSubclass() ? `<div class="card sub-choice">
+          <label><span class="lbl-row">Sous-classe (niveau ${SUBCLASS_LEVEL}) ${infoBtn(`class:${c.id}`, 'sous-classes')}</span>
+            <select data-w="subclass"><option value="">— Choisir —</option>${subs.map(([src, items]) =>
+              `<optgroup label="${esc(SOURCES[src])}">${items.map(x => `<option ${w.subclass === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('')}
+            </select></label>
+        </div>` : w.level >= SUBCLASS_LEVEL ? `<div class="card sub-choice"><label>Sous-classe (niveau ${SUBCLASS_LEVEL})
+          <input data-w="subclass" value="${esc(w.subclass)}" placeholder="Nom de la sous-classe (facultatif)"></label></div>` : ''}
+        ${w.levelChoices.map(ch => {
+          const abilitySelect = (key, val) => `<select data-ch="${ch.level}" data-chk="${key}">${ABILITIES.map(a =>
+            `<option value="${a.id}" ${val === a.id ? 'selected' : ''}>${a.name}</option>`).join('')}</select>`;
+          if (ch.kind === 'boon') {
+            return `<div class="card sub-choice"><h3>Niveau ${ch.level} — Don épique</h3>
+              <label>Nom du don épique<input data-ch="${ch.level}" data-chk="feat" value="${esc(ch.feat)}" placeholder="ex. Faveur de rapidité"></label></div>`;
+          }
+          return `<div class="card sub-choice">
+            <h3>Niveau ${ch.level} — Amélioration de caractéristiques ou don</h3>
+            <div class="seg">
+              <button data-a="chmode" data-l="${ch.level}" data-v="2" class="${ch.kind === 'asi' && ch.mode === '2' ? 'active' : ''}">+2 à une caractéristique</button>
+              <button data-a="chmode" data-l="${ch.level}" data-v="11" class="${ch.kind === 'asi' && ch.mode === '11' ? 'active' : ''}">+1 à deux caractéristiques</button>
+              <button data-a="chmode" data-l="${ch.level}" data-v="feat" class="${ch.kind === 'feat' ? 'active' : ''}">Un don</button>
+            </div>
+            ${ch.kind === 'feat'
+              ? `<label>Nom du don<input data-ch="${ch.level}" data-chk="feat" value="${esc(ch.feat)}" placeholder="ex. Maître des armes d'hast"></label>
+                 <p class="small muted">Si ce don augmente une caractéristique, ajuste la valeur sur ta fiche.</p>`
+              : ch.mode === '2'
+                ? `<div class="row"><label>+2 en ${abilitySelect('a', ch.a)}</label></div>`
+                : `<div class="row"><label>+1 en ${abilitySelect('a', ch.a)}</label><label>+1 en ${abilitySelect('b', ch.b)}</label></div>
+                   ${ch.a === ch.b ? '<p class="error">Choisis deux caractéristiques différentes.</p>' : ''}`}
+          </div>`;
+        }).join('')}
+        ${w.levelChoices.length ? `<div class="mini-abils">${ABILITIES.map(a =>
+          `<div class="${t[a.id] > 20 ? 'over' : ''}"><span>${a.short}</span><b>${t[a.id]}</b><small>${R.fmt(R.mod(t[a.id]))}</small></div>`).join('')}</div>
+          ${Object.values(t).some(v => v > 20) ? '<p class="error">Une caractéristique ne peut pas dépasser 20.</p>' : ''}` : ''}
+        <p class="notice wide">Les autres options (sorts connus ou préparés, expertises, style de combat, manifestations occultes, métamagie…)
+          restent à ton choix : renseigne-les sur ta fiche une fois le personnage créé.</p>`;
+    },
+
     () => `<div class="grid two">
         <div class="card">
           <label>Nom du personnage<input data-w="name" value="${esc(w.name)}" maxlength="60" required></label>
           <div class="row">
-            <label>Niveau<input type="number" min="1" max="20" data-w="level" value="${w.level}"></label>
+            <label>Niveau<input value="${w.level} (fixé par le MJ)" disabled></label>
             <label>Alignement<select data-w="alignment"><option value="">—</option>${ALIGNMENTS.map(a => `<option ${w.alignment === a ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
           </div>
           <label>Portrait (URL d'image, facultatif)<input data-w="portrait" value="${esc(w.portrait)}" placeholder="https://…"></label>
@@ -691,7 +833,13 @@ function wizardView() {
       const { pick: field, val } = pick.dataset;
       if (w[field] !== val) {
         w[field] = val;
-        if (field === 'classId') { w.classSkills = []; if (w.method === 'standard') suggestStandard(); }
+        if (field === 'classId') {
+          w.classSkills = [];
+          w.subclass = '';
+          w.levelChoices = [];
+          if (w.method === 'standard') suggestStandard();
+          syncChoices();
+        }
         if (field === 'speciesId') { w.lineage = ''; w.keenSense = ''; w.skillful = ''; }
         if (field === 'backgroundId') { defaultBgPicks(); w.classSkills = w.classSkills.filter(s => !ownedSkills().has(s)); }
       }
@@ -711,6 +859,11 @@ function wizardView() {
       if (v === 'pointbuy') ABILITIES.forEach(x => (w.base[x.id] = 8));
     }
     if (act === 'suggest') suggestStandard();
+    if (act === 'chmode') {
+      const ch = w.levelChoices.find(x => x.level === Number(a.dataset.l));
+      if (v === 'feat') ch.kind = 'feat';
+      else { ch.kind = 'asi'; ch.mode = v; }
+    }
     if (act === 'pb') {
       const nv = w.base[k] + Number(v);
       if (nv >= 8 && nv <= 15) w.base[k] = nv;
@@ -761,6 +914,9 @@ function wizardView() {
       w.keenSense = t.dataset.keen;
     } else if (t.hasAttribute('data-skillful')) {
       w.skillful = t.value;
+    } else if (t.dataset.ch) {
+      w.levelChoices.find(x => x.level === Number(t.dataset.ch))[t.dataset.chk] = t.value;
+      if (t.dataset.chk === 'feat') { refreshNav(); return; }
     } else if (t.dataset.w) {
       w[t.dataset.w] = t.dataset.w === 'level' ? Number(t.value) : t.value;
       if (['lineage', 'level', 'source'].includes(t.dataset.w)) render();
@@ -780,13 +936,23 @@ function wizardView() {
   });
 
   root.addEventListener('input', e => {
-    if (['name', 'customClassName', 'customSpeciesName'].includes(e.target.dataset.w)) {
-      w[e.target.dataset.w] = e.target.value;
+    const t = e.target;
+    if (['name', 'customClassName', 'customSpeciesName', 'subclass'].includes(t.dataset.w) && t.tagName === 'INPUT') {
+      w[t.dataset.w] = t.value;
+      refreshNav();
+    } else if (t.dataset.chk === 'feat') {
+      w.levelChoices.find(x => x.level === Number(t.dataset.ch)).feat = t.value;
       refreshNav();
     }
   });
 
   render();
+  // Niveau de départ fixé par le MJ.
+  store.getCampaign().then(cfg => {
+    w.level = Math.min(20, Math.max(1, Number(cfg.startLevel) || 1));
+    syncChoices();
+    render();
+  });
 }
 
 // ── Fiche de personnage ─────────────────────────────────────
@@ -1164,7 +1330,10 @@ function sheetView(id) {
   root.addEventListener('change', e => {
     const t = e.target;
     if (!canEdit || !c) return;
-    if (t.dataset.p === 'level') c.level = Math.min(20, Math.max(1, toNum(t.value) || 1));
+    if (t.dataset.p === 'level') {
+      c.level = Math.min(20, Math.max(1, toNum(t.value) || 1));
+      R.syncResources(c);
+    }
     if (t.dataset.p === 'speciesId') c.lineage = '';
     // Nouvelle classe : on repart de ses valeurs par défaut.
     if (t.dataset.p === 'classId') { delete c.classOverride; c.subclass = ''; }

@@ -2,7 +2,8 @@
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, FEATS,
   FULL_CASTER_SLOTS, PACT_SLOTS, byId,
-} from './data.js?v=202610291001';
+} from './data.js?v=202610291009';
+import { PROGRESSION, featuresUpTo, scalingValues, resourcesAt } from './progression.js?v=202610291009';
 
 export const mod = score => Math.floor((score - 10) / 2);
 export const fmt = n => (n >= 0 ? `+${n}` : `${n}`);
@@ -113,6 +114,53 @@ export function spellSlots(c) {
   return slots;
 }
 
+const mods = c => Object.fromEntries(ABILITIES.map(a => [a.id, abilityMod(c, a.id)]));
+
+// Ressources de classe attendues au niveau actuel : [[nom, max], …]
+export function classResources(c) {
+  const cls = byId(CLASSES, c.classId);
+  if (!cls) return [];
+  if (PROGRESSION[cls.id]) return resourcesAt(cls.id, c.level, mods(c));
+  return cls.resources.map(r => [r.name, resourceMax(c, r.max)]);
+}
+
+// Après un changement de niveau : met à jour le maximum des ressources de classe
+// (une ressource pleine reste pleine) et ajoute celles débloquées.
+export function syncResources(c) {
+  c.resources = c.resources ?? [];
+  classResources(c).forEach(([name, max]) => {
+    const r = c.resources.find(x => x.name === name);
+    if (!r) c.resources.push({ name, max, value: max });
+    else {
+      if (Number(r.value) >= Number(r.max)) r.value = max;
+      r.max = max;
+      r.value = Math.min(Number(r.value) || 0, max);
+    }
+  });
+}
+
+// Bonus de caractéristiques des améliorations choisies par niveau.
+export function choiceBonus(choices = []) {
+  const b = {};
+  const add = (ab, n) => { if (ab) b[ab] = (b[ab] ?? 0) + n; };
+  choices.forEach(ch => {
+    if (ch.kind !== 'asi') return;
+    if (ch.mode === '2') add(ch.a, 2);
+    else { add(ch.a, 1); add(ch.b, 1); }
+  });
+  return b;
+}
+
+// Texte « progression » ajouté aux capacités de la fiche.
+export function progressionText(classId, level, choices = []) {
+  const lines = featuresUpTo(classId, level).map(([l, names]) => `Niv. ${l} : ${names.join(', ')}`);
+  const vals = scalingValues(classId, level);
+  if (vals.length) lines.push(`Au niveau ${level} : ${vals.join(' · ')}`);
+  choices.filter(ch => ch.kind !== 'asi' && ch.feat?.trim()).forEach(ch =>
+    lines.push(`${ch.kind === 'boon' ? 'Don épique' : 'Don'} (niv. ${ch.level}) : ${ch.feat.trim()}`));
+  return lines;
+}
+
 export function resourceMax(c, max) {
   if (max === 'cha') return Math.max(1, abilityMod(c, 'cha'));
   if (max === 'lay') return 5 * Math.max(1, c.level);
@@ -144,7 +192,7 @@ export function buildCharacter(w) {
     name: w.name.trim(),
     classId: cls.id,
     customClassName: w.customClassName?.trim() || '',
-    subclass: '',
+    subclass: w.subclass || '',
     level: w.level,
     speciesId: sp.id,
     customSpeciesName: w.customSpeciesName?.trim() || '',
@@ -155,7 +203,8 @@ export function buildCharacter(w) {
     xp: 0,
     base: { ...w.base },
     bgBonus: { ...w.bgBonus },
-    otherBonus: {},
+    otherBonus: choiceBonus(w.levelChoices),
+    levelChoices: (w.levelChoices ?? []).map(ch => ({ ...ch })),
     skills,
     extraSaves: [],
     initMisc: 0,
@@ -175,6 +224,7 @@ export function buildCharacter(w) {
       cls.features && `Classe : ${cls.features}`,
       sp.traits && `Espèce : ${sp.traits}${w.lineage ? ` (${w.lineage})` : ''}`,
       `Don d'origine : ${FEATS[bg.feat]}`,
+      ...progressionText(cls.id, w.level, w.levelChoices),
     ].filter(Boolean).join('\n'),
     proficiencies: [
       cls.armor && `Armures : ${cls.armor}`,
@@ -191,9 +241,6 @@ export function buildCharacter(w) {
   c.ac = suggestedAC(c);
   c.hp = { max: suggestedMaxHP(c), current: 0, temp: 0 };
   c.hp.current = c.hp.max;
-  c.resources = cls.resources.map(r => {
-    const max = resourceMax(c, r.max);
-    return { name: r.name, max, value: max };
-  });
+  c.resources = classResources(c).map(([name, max]) => ({ name, max, value: max }));
   return c;
 }

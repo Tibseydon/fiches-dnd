@@ -69,6 +69,13 @@ Envoie-leur l'adresse du site et le **code de campagne**. Sans ce code, l'inscri
 
 ---
 
+## Mise à jour : pseudo modifiable et niveau de départ
+
+Si ta base Supabase a été créée avant cette mise à jour, exécute **une fois** le fichier [`maj-pseudo-campagne.sql`](maj-pseudo-campagne.sql) dans **SQL Editor → New query → Run**. Il ne touche ni aux fiches ni au code de campagne.
+
+- **Pseudo** : chaque joueur le change dans « Mon profil » (clic sur son nom en haut à droite). Ses fiches affichent automatiquement le nouveau nom.
+- **Niveau de départ** : le MJ le règle dans l'onglet **Campagne**. Les nouveaux personnages sont créés à ce niveau (PV, maîtrise, emplacements de sorts, ressources et capacités calculés), et l'assistant demande au joueur sa sous-classe et ses améliorations de caractéristiques ou dons. Sorts et autres options restent à remplir sur la fiche.
+
 ## Extensions incluses
 
 En plus du Manuel des joueurs 2024, l'assistant de création et la fiche proposent les classes, sous-classes et espèces de :

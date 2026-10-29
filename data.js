@@ -1,5 +1,5 @@
 // Données de règles D&D 5.5 (Manuel des joueurs 2024), en français.
-import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js?v=202610291001';
+import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js?v=202610291009';
 
 export { SOURCES };
 
