@@ -336,8 +336,8 @@ function wizardView() {
   const ownedSkills = () => new Set([...(bg()?.skills ?? [])]);
   const extraSkills = () => [w.keenSense, w.skillful].filter(Boolean);
 
-  function valid() {
-    switch (w.step) {
+  function valid(step = w.step) {
+    switch (step) {
       case 0: return !!w.classId && (w.classId !== 'custom' || !!w.customClassName.trim());
       case 1: return !!w.speciesId && (!sp().lineages || !!w.lineage)
         && (w.speciesId !== 'custom' || !!w.customSpeciesName.trim());
@@ -349,6 +349,21 @@ function wizardView() {
     }
     return true;
   }
+
+  // Une étape est accessible si toutes celles d'avant sont complètes.
+  const reachable = i => {
+    for (let k = 0; k < i; k++) if (!valid(k)) return false;
+    return true;
+  };
+  const goTo = i => {
+    w.step = i;
+    if (i === 3 && w.method === 'standard' && Object.values(w.base).every(x => x === 8)) suggestStandard();
+    window.scrollTo(0, 0);
+  };
+  const stepperBar = () => `<ol class="stepper-bar">${STEPS.map((s, i) => `<li>
+      <button class="${i === w.step ? 'current' : i < w.step ? 'done' : ''}" data-a="goto" data-v="${i}"
+        ${i !== w.step && reachable(i) ? '' : 'disabled'} ${i === w.step ? 'aria-current="step"' : ''}>${i + 1}. ${s}</button>
+    </li>`).join('')}</ol>`;
 
   const optionCard = (field, o, body) => `
     <button class="card option${w[field] === o.id ? ' selected' : ''}" data-pick="${field}" data-val="${o.id}">
@@ -517,7 +532,7 @@ function wizardView() {
   function render() {
     root.innerHTML = `
       <div class="page-head"><h1>Nouveau personnage</h1></div>
-      <ol class="stepper-bar">${STEPS.map((s, i) => `<li class="${i === w.step ? 'current' : i < w.step ? 'done' : ''}">${i + 1}. ${s}</li>`).join('')}</ol>
+      ${stepperBar()}
       <section class="wizard-body">${steps[w.step]()}</section>
       <div class="wizard-nav">
         <button class="btn ghost" data-a="prev" ${w.step === 0 ? 'disabled' : ''}>← Retour</button>
@@ -530,6 +545,7 @@ function wizardView() {
   const refreshNav = () => {
     const btn = root.querySelector('[data-a=next],[data-a=create]');
     if (btn) btn.disabled = !valid();
+    root.querySelector('.stepper-bar')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: stepperBar() }).firstElementChild);
   };
 
   root.addEventListener('click', async e => {
@@ -548,7 +564,8 @@ function wizardView() {
     const a = e.target.closest('[data-a]');
     if (!a) return;
     const { a: act, v, k } = a.dataset;
-    if (act === 'next' && valid()) { w.step++; if (w.step === 3 && w.method === 'standard' && Object.values(w.base).every(x => x === 8)) suggestStandard(); window.scrollTo(0, 0); }
+    if (act === 'next' && valid()) goTo(w.step + 1);
+    if (act === 'goto' && reachable(Number(v))) goTo(Number(v));
     if (act === 'prev') { w.step--; window.scrollTo(0, 0); }
     if (act === 'bgmode') { w.bgMode = v; defaultBgPicks(); }
     if (act === 'method') {

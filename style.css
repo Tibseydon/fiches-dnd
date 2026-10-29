@@ -215,9 +215,11 @@ table.party tbody tr:hover { background: var(--bg-2); }
 
 /* ── Assistant ── */
 .stepper-bar { list-style: none; padding: 0; margin: 0 0 18px; display: flex; gap: 6px; flex-wrap: wrap; }
-.stepper-bar li { padding: 6px 12px; border-radius: 99px; background: var(--bg-2); color: var(--muted); font-size: .85rem; font-weight: 600; }
-.stepper-bar li.current { background: var(--accent); color: var(--accent-ink); }
-.stepper-bar li.done { color: var(--ok); }
+.stepper-bar button { padding: 6px 12px; border-radius: 99px; border: 0; background: var(--bg-2); color: var(--muted); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.stepper-bar button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.stepper-bar button:disabled { cursor: default; opacity: .6; }
+.stepper-bar button.current { background: var(--accent); color: var(--accent-ink); opacity: 1; }
+.stepper-bar button.done { color: var(--ok); }
 .grid.options { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .option { text-align: left; cursor: pointer; font: inherit; color: inherit; margin: 0 !important; }
 .option:hover { border-color: var(--accent); }
