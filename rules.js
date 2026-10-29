@@ -2,8 +2,8 @@
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, FEATS,
   FULL_CASTER_SLOTS, PACT_SLOTS, byId,
-} from './data.js?v=202610291350';
-import { PROGRESSION, featuresUpTo, scalingValues, resourcesAt } from './progression.js?v=202610291350';
+} from './data.js?v=202610291354';
+import { PROGRESSION, featuresUpTo, scalingValues, resourcesAt } from './progression.js?v=202610291354';
 
 export const mod = score => Math.floor((score - 10) / 2);
 export const fmt = n => (n >= 0 ? `+${n}` : `${n}`);

@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291350';
-import { CAMPAIGN_NAME } from './config.js?v=202610291350';
+import * as store from './store.js?v=202610291354';
+import { CAMPAIGN_NAME } from './config.js?v=202610291354';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610291350';
-import * as R from './rules.js?v=202610291350';
+} from './data.js?v=202610291354';
+import * as R from './rules.js?v=202610291354';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291350';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291350';
+} from './info.js?v=202610291354';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291354';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -62,6 +62,31 @@ function bySource(list) {
     .map(src => [src, list.filter(x => x.source === src)])
     .filter(([, items]) => items.length);
 }
+
+// ── Recherche ───────────────────────────────────────────────
+
+// Texte comparable : minuscules, sans accents.
+const norm = t => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+// Masque les éléments [data-search] qui ne contiennent pas tous les mots cherchés,
+// puis les groupes [data-search-group] devenus vides ; affiche [data-search-empty] si rien ne reste.
+function applySearch(container, query) {
+  if (!container) return;
+  const words = norm(query).split(/\s+/).filter(Boolean);
+  container.querySelectorAll('[data-search]').forEach(el => {
+    const hide = words.length > 0 && !words.every(wd => el.dataset.search.includes(wd));
+    el.hidden = hide;
+    if (el.tagName === 'OPTION') el.disabled = hide && !el.selected;
+  });
+  container.querySelectorAll('[data-search-group]').forEach(g => {
+    g.hidden = !g.querySelector('[data-search]:not([hidden])');
+  });
+  const empty = container.querySelector('[data-search-empty]');
+  if (empty) empty.hidden = !!container.querySelector('[data-search]:not([hidden])') || !words.length;
+}
+
+const searchBox = (value, placeholder) =>
+  `<input type="search" class="search" data-search-input value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">`;
 
 // ── Fiches d'information (icônes « i ») ─────────────────────
 
@@ -848,6 +873,9 @@ const PRIORITY = {
 };
 
 const STEPS = ['Classe', 'Espèce', 'Historique', 'Caractéristiques', 'Compétences', 'Niveau', 'Finalisation'];
+const SEARCH_PLACEHOLDER = {
+  0: 'Rechercher une classe…', 1: 'Rechercher une espèce…', 2: 'Rechercher un historique, un don…', 5: 'Rechercher une sous-classe…',
+};
 
 function wizardView() {
   const w = {
@@ -857,7 +885,7 @@ function wizardView() {
     classSkills: [], keenSense: '', skillful: '',
     name: '', level: 1, alignment: '', portrait: '', personality: '', backstory: '',
     customClassName: '', customSpeciesName: '', source: 'all',
-    subclass: '', levelChoices: [],
+    subclass: '', levelChoices: [], search: '',
   };
   const root = mount('');
 
@@ -924,6 +952,7 @@ function wizardView() {
     return true;
   };
   const goTo = i => {
+    if (i !== w.step) w.search = '';
     w.step = i;
     if (i === 3 && w.method === 'standard' && Object.values(w.base).every(x => x === 8)) suggestStandard();
     window.scrollTo(0, 0);
@@ -934,8 +963,12 @@ function wizardView() {
     </li>`).join('')}</ol>`;
 
   const infoKey = { classId: 'class', speciesId: 'species', backgroundId: 'bg' };
+  const searchText = o => norm([o.name, o.original, SOURCES[o.source], o.desc, o.traits, o.primary,
+    o.feat && FEATS[o.feat], ...(o.skills ?? []).map(x => byId(SKILLS, x)?.name), o.tool, ...(o.lineages ?? []),
+    o.hd && `d${o.hd}`, ...(o.saves ?? []).map(x => byId(ABILITIES, x)?.name),
+    o.spellAb && `sorts magie lanceur ${byId(ABILITIES, o.spellAb)?.name}`].filter(Boolean).join(' '));
   const optionCard = (field, o, body) => `
-    <div class="card option${w[field] === o.id ? ' selected' : ''}" role="button" tabindex="0" aria-pressed="${w[field] === o.id}" data-pick="${field}" data-val="${o.id}">
+    <div class="card option${w[field] === o.id ? ' selected' : ''}" data-search="${esc(searchText(o))}" role="button" tabindex="0" aria-pressed="${w[field] === o.id}" data-pick="${field}" data-val="${o.id}">
       <div class="option-head"><h3>${esc(o.name)}${o.original && o.original !== o.name ? ` <small class="vo">${esc(o.original)}</small>` : ''}</h3>${infoBtn(`${infoKey[field]}:${o.id}`, o.name)}</div>${body}
     </div>`;
 
@@ -950,8 +983,9 @@ function wizardView() {
   // Un livre sans contenu pour cette étape (ex. pas d'espèce) revient à « Tous ».
   const groupedCards = (list, field, body) => bySource(list)
     .filter(([src], _, all) => !all.some(([x]) => x === w.source) || w.source === src)
-    .map(([src, items]) => `<h3 class="src-head">${esc(SOURCES[src])}</h3>
-      <div class="grid options">${items.map(o => optionCard(field, o, body(o))).join('')}</div>`).join('');
+    .map(([src, items]) => `<div data-search-group><h3 class="src-head">${esc(SOURCES[src])}</h3>
+      <div class="grid options">${items.map(o => optionCard(field, o, body(o))).join('')}</div></div>`).join('')
+    + '<p class="muted" data-search-empty hidden>Aucun résultat : essaie un autre mot, ou choisis « Tous les livres ».</p>';
   const verifyBadge = '<span class="badge warn" title="Données non confirmées : à ajuster sur la fiche">à vérifier</span>';
 
   const steps = [
@@ -985,6 +1019,7 @@ function wizardView() {
           </select></label></div>` : ''}`,
 
     () => `<p class="muted">L'historique donne les bonus de caractéristiques, un don d'origine, deux compétences et un outil.</p>
+      <p class="muted" data-search-empty hidden>Aucun historique ne correspond à ta recherche.</p>
       <div class="grid options">${BACKGROUNDS.map(b => optionCard('backgroundId', b, `
         <div class="tags">${b.abilities.map(a => `<span class="badge">${R.abilityShort(a)}</span>`).join('')}</div>
         <p class="small"><b>Don :</b> ${esc(FEATS[b.feat])} ${infoBtn(`feat:${b.feat}`, FEATS[b.feat])}<br>
@@ -1086,7 +1121,7 @@ function wizardView() {
         ${needsSubclass() ? `<div class="card sub-choice">
           <label><span class="lbl-row">Sous-classe (niveau ${SUBCLASS_LEVEL}) ${infoBtn(`class:${c.id}`, 'sous-classes')}</span>
             <select data-w="subclass"><option value="">— Choisir —</option>${subs.map(([src, items]) =>
-              `<optgroup label="${esc(SOURCES[src])}">${items.map(x => `<option ${w.subclass === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('')}
+              `<optgroup label="${esc(SOURCES[src])}" data-search-group>${items.map(x => `<option data-search="${esc(norm(`${x.name} ${c.subclassOriginal?.[x.name] ?? ''} ${SOURCES[src]}`))}" ${w.subclass === x.name ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('')}
             </select></label>
         </div>` : w.level >= SUBCLASS_LEVEL ? `<div class="card sub-choice"><label>Sous-classe (niveau ${SUBCLASS_LEVEL})
           <input data-w="subclass" value="${esc(w.subclass)}" placeholder="Nom de la sous-classe (facultatif)"></label></div>` : ''}
@@ -1155,7 +1190,10 @@ function wizardView() {
       <div class="page-head"><h1>Nouveau personnage</h1></div>
       <div class="wizard-top">
         ${stepperBar()}
-        ${w.step === 0 ? sourcePicker(CLASSES) : w.step === 1 ? sourcePicker(SPECIES) : ''}
+        <div class="row">
+          ${SEARCH_PLACEHOLDER[w.step] && (w.step !== 5 || needsSubclass()) ? searchBox(w.search, SEARCH_PLACEHOLDER[w.step]) : ''}
+          ${w.step === 0 ? sourcePicker(CLASSES) : w.step === 1 ? sourcePicker(SPECIES) : ''}
+        </div>
       </div>
       <section class="wizard-body">${steps[w.step]()}</section>
       <div class="wizard-nav">
@@ -1164,6 +1202,7 @@ function wizardView() {
           ? `<button class="btn primary" data-a="next" ${valid() ? '' : 'disabled'}>Suivant →</button>`
           : `<button class="btn primary" data-a="create" ${valid() ? '' : 'disabled'}>Créer le personnage</button>`}
       </div>`;
+    applySearch(root.querySelector('.wizard-body'), w.search);
   }
 
   const refreshNav = () => {
@@ -1196,7 +1235,7 @@ function wizardView() {
     const { a: act, v, k } = a.dataset;
     if (act === 'next' && valid()) goTo(w.step + 1);
     if (act === 'goto' && reachable(Number(v))) goTo(Number(v));
-    if (act === 'prev') { w.step--; window.scrollTo(0, 0); }
+    if (act === 'prev') { w.step--; w.search = ''; window.scrollTo(0, 0); }
     if (act === 'bgmode') { w.bgMode = v; defaultBgPicks(); }
     if (act === 'method') {
       w.method = v;
@@ -1282,6 +1321,11 @@ function wizardView() {
 
   root.addEventListener('input', e => {
     const t = e.target;
+    if (t.hasAttribute('data-search-input')) {
+      w.search = t.value;
+      applySearch(root.querySelector('.wizard-body'), w.search);
+      return;
+    }
     if (['name', 'customClassName', 'customSpeciesName', 'subclass'].includes(t.dataset.w) && t.tagName === 'INPUT') {
       w[t.dataset.w] = t.value;
       refreshNav();
@@ -1312,6 +1356,7 @@ function sheetView(id) {
   let saving = false;
   let canEdit = false;
   let settingsOpen = null; // panneau « Réglages de classe » ouvert par le joueur
+  let spellQuery = ''; // recherche dans l'onglet Sorts
 
   const dis = () => (canEdit ? '' : 'disabled');
   const val = p => getPath(c, p) ?? '';
@@ -1601,18 +1646,19 @@ function sheetView(id) {
         </details>
         ${cls?.caster === 'pact' ? '<button class="btn ghost small" data-a="shortrest">Repos court (récupérer les emplacements)</button>' : ''}` : ''}
       </section>
-      <section class="card">
-        <h2>Sorts</h2>
-        ${spells.length ? levels.map(l => `
+      <section class="card spells-card">
+        <div class="row spread"><h2>Sorts</h2>${spells.length > 1 ? searchBox(spellQuery, 'Rechercher un sort…') : ''}</div>
+        <p class="muted small" data-search-empty hidden>Aucun sort ne correspond à ta recherche.</p>
+        ${spells.length ? levels.map(l => `<div data-search-group>
           <h3 class="spell-level">${l === 0 ? 'Sorts mineurs' : `Niveau ${l}`}</h3>
           <table class="list-table spells"><thead><tr><th class="w-prep" title="Préparé">Prép.</th><th>Nom</th><th class="w-lvl">Niv.</th><th>Notes (portée, durée, effet…)</th>${canEdit ? '<th></th>' : ''}</tr></thead>
-          <tbody>${spells.filter(s => (Number(s.level) || 0) === l).map(s => `<tr>
+          <tbody>${spells.filter(s => (Number(s.level) || 0) === l).map(s => `<tr data-search="${esc(norm(`${s.name} ${s.notes} ${l === 0 ? 'mineur' : `niveau ${l}`}`))}">
             <td><input type="checkbox" data-p="spells.${s.i}.prepared" data-t="bool" ${s.prepared ? 'checked' : ''} ${dis()}></td>
             <td>${inp(`spells.${s.i}.name`)}</td>
             <td><select data-p="spells.${s.i}.level" data-t="num" data-r ${dis()}>${Array.from({ length: 10 }, (_, n) => `<option value="${n}" ${n === l ? 'selected' : ''}>${n === 0 ? 'Mineur' : n}</option>`).join('')}</select></td>
             <td>${inp(`spells.${s.i}.notes`)}</td>
             ${canEdit ? `<td><button class="icon" data-a="del" data-k="spells" data-n="${s.i}" title="Supprimer">✕</button></td>` : ''}
-          </tr>`).join('')}</tbody></table>`).join('') : '<p class="muted small">Aucun sort pour l\'instant.</p>'}
+          </tr>`).join('')}</tbody></table></div>`).join('') : '<p class="muted small">Aucun sort pour l\'instant.</p>'}
         ${canEdit ? '<button class="btn ghost small" data-a="add" data-k="spells">+ Ajouter un sort</button>' : ''}
       </section>`;
   }
@@ -1647,6 +1693,7 @@ function sheetView(id) {
       <nav class="tabs sheet-tabs">${TABS.map(([k, l]) => `<button class="tab ${tab === k ? 'active' : ''}" data-a="tab" data-k="${k}">${l}</button>`).join('')}</nav>
       <div class="tab-body">${body}</div>`;
     updateDerived();
+    applySearch(root.querySelector('.spells-card'), spellQuery);
     window.scrollTo(0, y);
   }
 
@@ -1659,6 +1706,11 @@ function sheetView(id) {
 
   root.addEventListener('input', e => {
     const t = e.target;
+    if (t.hasAttribute('data-search-input')) {
+      spellQuery = t.value;
+      applySearch(root.querySelector('.spells-card'), spellQuery);
+      return;
+    }
     if (!canEdit || !c) return;
     if (t.dataset.score) {
       const ab = t.dataset.score;
@@ -1674,7 +1726,7 @@ function sheetView(id) {
 
   root.addEventListener('change', e => {
     const t = e.target;
-    if (!canEdit || !c) return;
+    if (!canEdit || !c || t.hasAttribute('data-search-input')) return;
     if (t.dataset.p === 'level') {
       c.level = Math.min(20, Math.max(1, toNum(t.value) || 1));
       R.syncResources(c);
