@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291053';
-import { CAMPAIGN_NAME } from './config.js?v=202610291053';
+import * as store from './store.js?v=202610291331';
+import { CAMPAIGN_NAME } from './config.js?v=202610291331';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, byId,
-} from './data.js?v=202610291053';
-import * as R from './rules.js?v=202610291053';
+} from './data.js?v=202610291331';
+import * as R from './rules.js?v=202610291331';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291053';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291053';
+} from './info.js?v=202610291331';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291331';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -723,6 +723,12 @@ function libraryView() {
     Object.assign(st, { title: f.get('title').trim(), url: f.get('url').trim(), from: f.get('from'), to: f.get('to'), log: '' });
     const file = f.get('file');
     if (!file?.size && !st.url) { st.log = 'Choisis un fichier ou colle un lien.'; render(); return; }
+    // Liseuses en ligne : elles ne fournissent pas de fichier téléchargeable.
+    if (!file?.size && /(^|\.)(scribd\.com|anyflip\.com|issuu\.com|fliphtml5\.com|yumpu\.com)$/i.test((() => { try { return new URL(st.url).hostname; } catch { return ''; } })())) {
+      st.log = "Ce site affiche les documents dans une liseuse et ne permet pas de les télécharger automatiquement. Importe plutôt le PDF de ton livre avec « Fichier ».";
+      render();
+      return;
+    }
     st.phase = 'reading';
     render();
     const progress = t => { const el = root.querySelector('#lib-progress'); if (el) el.textContent = t; };

@@ -115,6 +115,26 @@ function isPrivateHost(host: string) {
     || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
 }
 
+// Liens de partage Google → lien de téléchargement direct.
+function directUrl(url: URL): URL {
+  const h = url.hostname;
+  const docId = url.pathname.match(/\/document\/d\/([\w-]{20,})/)?.[1];
+  if (h === "docs.google.com" && docId && docId !== "e") {
+    return new URL(`https://docs.google.com/document/d/${docId}/export?format=txt`);
+  }
+  const fileId = url.pathname.match(/\/file\/d\/([\w-]{20,})/)?.[1] ?? url.searchParams.get("id");
+  if (h === "drive.google.com" && fileId) {
+    return new URL(`https://drive.google.com/uc?export=download&id=${fileId}`);
+  }
+  return url;
+}
+
+const FETCH_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+  "Accept": "application/pdf,text/html,text/plain;q=0.9,*/*;q=0.8",
+  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Méthode non autorisée." }, 405);
@@ -137,8 +157,17 @@ Deno.serve(async (req) => {
     if (!["http:", "https:"].includes(url.protocol) || isPrivateHost(url.hostname)) {
       return json({ error: "Lien non autorisé." }, 400);
     }
-    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30_000) }).catch(() => null);
-    if (!res || !res.ok) return json({ error: `Impossible de télécharger ce lien (${res?.status ?? "réseau"}).` }, 502);
+    const res = await fetch(directUrl(url), { headers: FETCH_HEADERS, redirect: "follow", signal: AbortSignal.timeout(30_000) })
+      .catch(() => null);
+    if (!res || !res.ok) {
+      const status = res?.status;
+      const why = status === 401 || status === 403
+        ? "le site refuse le téléchargement automatique, ou le document n'est pas partagé publiquement"
+        : status === 404 ? "page introuvable" : status ? `erreur ${status}` : "site injoignable";
+      return json({
+        error: `Impossible de télécharger ce lien (${why}). Télécharge le fichier sur ton ordinateur, puis importe-le avec « Fichier ».`,
+      }, 502);
+    }
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength > MAX_FETCH_BYTES) return json({ error: "Fichier trop gros (30 Mo maximum)." }, 413);
     return new Response(buf, { headers: { ...CORS, "Content-Type": "application/octet-stream" } });
