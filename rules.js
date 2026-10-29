@@ -2,7 +2,7 @@
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, FEATS,
   FULL_CASTER_SLOTS, PACT_SLOTS, byId,
-} from './data.js';
+} from './data.js?v=202610290953';
 
 export const mod = score => Math.floor((score - 10) / 2);
 export const fmt = n => (n >= 0 ? `+${n}` : `${n}`);

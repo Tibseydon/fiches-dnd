@@ -1,10 +1,10 @@
-import * as store from './store.js';
-import { CAMPAIGN_NAME } from './config.js';
+import * as store from './store.js?v=202610290953';
+import { CAMPAIGN_NAME } from './config.js?v=202610290953';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, byId,
-} from './data.js';
-import * as R from './rules.js';
+} from './data.js?v=202610290953';
+import * as R from './rules.js?v=202610290953';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
