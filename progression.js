@@ -134,12 +134,18 @@ export function asiLevels(classId, level) {
 }
 
 // Capacités gagnées entre le niveau 2 et `level` (le niveau 1 est décrit à part).
-export function featuresUpTo(classId, level) {
-  const f = PROGRESSION[classId]?.features ?? {};
+// `libFeatures` : capacités d'une classe importée depuis la bibliothèque du MJ.
+export function featuresUpTo(classId, level, libFeatures = null) {
+  const f = Object.fromEntries(Object.entries(PROGRESSION[classId]?.features ?? {}).map(([l, n]) => [l, [...n]]));
+  if (libFeatures) {
+    libFeatures.forEach(x => {
+      if (x.level >= 2) (f[x.level] = f[x.level] ?? []).push(x.name);
+    });
+  }
   const out = [];
   for (let l = 2; l <= level; l++) {
     const names = [...(f[l] ?? [])];
-    if (!PROGRESSION[classId] && l === SUBCLASS_LEVEL) names.push('Sous-classe');
+    if (!PROGRESSION[classId] && !libFeatures && l === SUBCLASS_LEVEL) names.push('Sous-classe');
     if (asiLevels(classId, l).includes(l)) names.push('Amélioration de caractéristiques');
     if (l === EPIC_BOON_LEVEL) names.push('Don épique');
     if (names.length) out.push([l, names]);

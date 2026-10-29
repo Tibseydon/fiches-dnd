@@ -1,5 +1,5 @@
 // Couche de stockage : Supabase (partagé) ou localStorage (mode test).
-import { SUPABASE_URL, SUPABASE_KEY } from './config.js?v=202610291009';
+import { SUPABASE_URL, SUPABASE_KEY } from './config.js?v=202610291038';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.76.1/+esm';
 
@@ -24,6 +24,11 @@ export const deleteCharacter = id => impl.deleteCharacter(id);
 export const updateProfile = displayName => impl.updateProfile(displayName);
 export const getCampaign = () => impl.getCampaign();
 export const saveCampaign = settings => impl.saveCampaign(settings);
+
+export const listContent = () => impl.listContent();
+export const addContent = items => impl.addContent(items);
+export const deleteContent = ids => impl.deleteContent(ids);
+export const libraryCall = body => impl.libraryCall(body);
 
 export const DEFAULT_CAMPAIGN = { startLevel: 1 };
 
@@ -151,6 +156,35 @@ async function supabaseImpl() {
       if (error || !data) return { ...DEFAULT_CAMPAIGN };
       return { ...DEFAULT_CAMPAIGN, ...data.settings };
     },
+    async listContent() {
+      const { data, error } = await sb.from('content_items').select('id, kind, name, source_title, data').order('created_at');
+      // Table absente (mise à jour SQL pas encore faite) : bibliothèque vide.
+      return error ? [] : data;
+    },
+    async addContent(items) {
+      const rows = check(await sb.from('content_items').insert(items).select('id'));
+      if (rows.length !== items.length) throw new Error("Enregistrement refusé (réservé au MJ, ou mise à jour SQL « maj-bibliotheque.sql » pas faite).");
+    },
+    async deleteContent(ids) {
+      check(await sb.from('content_items').delete().in('id', ids));
+    },
+    // Appel de la fonction serveur « extraire-livre » (voir edge-function/index.ts).
+    async libraryCall(body) {
+      const { data, error } = await sb.functions.invoke('extraire-livre', { body });
+      if (error) {
+        let msg = error.message;
+        let retry = false;
+        try {
+          const j = await error.context.json();
+          msg = j.error ?? msg;
+          retry = !!j.retry;
+        } catch {
+          if (/Failed to send|not found|404/i.test(msg)) msg = "Fonction « extraire-livre » introuvable : installe-la dans Supabase (voir README).";
+        }
+        throw Object.assign(new Error(msg), { retry });
+      }
+      return data;
+    },
     async saveCampaign(settings) {
       const rows = check(await sb.from('campaign').update({ settings, updated_at: new Date().toISOString() }).eq('id', 1).select('id'));
       if (!rows.length) throw new Error("Seul le MJ peut modifier la campagne (ou la mise à jour SQL « maj-pseudo-campagne.sql » n'est pas faite).");
@@ -263,6 +297,14 @@ function localImpl() {
       emitAuth();
     },
     async getCampaign() { return { ...DEFAULT_CAMPAIGN, ...read(K.campaign, {}) }; },
+    async listContent() { return read('dnd55.content', []); },
+    async addContent(items) {
+      write('dnd55.content', [...read('dnd55.content', []), ...items.map(it => ({ ...it, id: uid() }))]);
+    },
+    async deleteContent(ids) {
+      write('dnd55.content', read('dnd55.content', []).filter(it => !ids.includes(it.id)));
+    },
+    async libraryCall() { throw new Error("L'extraction automatique nécessite Supabase (mode local)."); },
     async saveCampaign(settings) {
       if (current()?.role !== 'mj') throw new Error('Seul le MJ peut modifier la campagne.');
       write(K.campaign, settings);

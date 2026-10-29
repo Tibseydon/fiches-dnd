@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291009';
-import { CAMPAIGN_NAME } from './config.js?v=202610291009';
+import * as store from './store.js?v=202610291038';
+import { CAMPAIGN_NAME } from './config.js?v=202610291038';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
-  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, byId,
-} from './data.js?v=202610291009';
-import * as R from './rules.js?v=202610291009';
+  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, byId,
+} from './data.js?v=202610291038';
+import * as R from './rules.js?v=202610291038';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291009';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291009';
+} from './info.js?v=202610291038';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291038';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -100,8 +100,12 @@ function classInfo(id) {
     ])}
     ${infoCharacter?.classId === id ? `<p class="small muted">Niveau actuel : ${infoCharacter.level}${scalingValues(id, infoCharacter.level).length ? ` · ${esc(scalingValues(id, infoCharacter.level).join(' · '))}` : ''}</p>` : ''}
     <h4>Capacités de niveau 1</h4>
-    ${CLASS_FEATURE_INFO[id] ? infoList(CLASS_FEATURE_INFO[id]) : `<p>${esc(cls.features || 'À recopier depuis ton livre.')}</p>`}
-    ${featuresUpTo(id, 20).length ? `<h4>Progression</h4><ul class="info-list">${featuresUpTo(id, 20).map(([l, names]) =>
+    ${CLASS_FEATURE_INFO[id] ? infoList(CLASS_FEATURE_INFO[id])
+      : cls.libFeatures ? infoList(cls.libFeatures.filter(f => f.level <= 1).map(f => [f.name, f.summary]))
+      : `<p>${esc(cls.features || 'À recopier depuis ton livre.')}</p>`}
+    ${cls.libFeatures?.some(f => f.level > 1) ? `<h4>Capacités par niveau</h4>${infoList(cls.libFeatures.filter(f => f.level > 1)
+      .sort((a, b) => a.level - b.level).map(f => [`Niv. ${f.level} — ${f.name}`, f.summary]))}` : ''}
+    ${!cls.libFeatures && featuresUpTo(id, 20).length ? `<h4>Progression</h4><ul class="info-list">${featuresUpTo(id, 20).map(([l, names]) =>
       `<li class="${infoCharacter?.classId === id && l <= infoCharacter.level ? 'reached' : ''}"><b>Niv. ${l}</b> — ${esc(names.join(', '))}</li>`).join('')}</ul>` : ''}
     ${subs.length ? `<h4>Sous-classes (niveau 3)</h4>${subs.map(([src, items]) =>
       `<p class="small"><b>${esc(SOURCES[src])} :</b> ${items.map(x => esc(x.name)).join(', ')}</p>`).join('')}` : ''}`];
@@ -110,7 +114,7 @@ function classInfo(id) {
 function speciesInfo(id) {
   const sp = byId(SPECIES, id);
   if (!sp) return null;
-  const traits = SPECIES_INFO[id];
+  const traits = SPECIES_INFO[id] ?? (sp.traitsInfo?.length ? sp.traitsInfo : null);
   return [sp.name, `
     ${srcLine(sp.source)}
     ${infoRows([
@@ -131,7 +135,7 @@ function backgroundInfo(id) {
   return [bg.name, `
     ${infoRows([
       ['Caractéristiques', `${bg.abilities.map(a => byId(ABILITIES, a).name).join(', ')} : +2 / +1 ou +1 / +1 / +1`],
-      ['Don d\'origine', `<b>${esc(FEATS[bg.feat])}</b> — ${esc(FEAT_INFO[bg.feat])}`],
+      ['Don d\'origine', `<b>${esc(FEATS[bg.feat])}</b> — ${esc(FEAT_INFO[bg.feat] ?? LIB_INFO.feats[bg.feat] ?? '')}`],
       ['Compétences', bg.skills.map(skillName).join(', ')],
       ['Outil', esc(bg.tool)],
     ])}
@@ -144,7 +148,7 @@ function infoContent(key) {
     case 'class': return classInfo(id);
     case 'species': return speciesInfo(id);
     case 'bg': return backgroundInfo(id);
-    case 'feat': return FEATS[id] ? [FEATS[id], `<p>${esc(FEAT_INFO[id])}</p><p class="small muted">Don d'origine (niveau 1).</p>`] : null;
+    case 'feat': return FEATS[id] ? [FEATS[id], `<p>${esc(FEAT_INFO[id] ?? LIB_INFO.feats[id] ?? '')}</p><p class="small muted">Don d'origine (niveau 1).</p>`] : null;
     case 'skill': {
       const sk = byId(SKILLS, id);
       return sk && [sk.name, `<p class="info-src">Caractéristique : ${byId(ABILITIES, sk.ab).name}</p><p>${esc(SKILL_INFO[id])}</p>`];
@@ -161,8 +165,12 @@ function infoContent(key) {
       const c = infoCharacter;
       const cls = c && R.classOf(c);
       const src = cls?.subclassSources?.[c.subclass];
-      return [c?.subclass || 'Sous-classe', `${src ? srcLine(src) : ''}<p>${esc(STAT_INFO.subclass[1])}</p>
-        ${src && src !== 'phb' ? '<p class="small muted">Capacités à recopier depuis le livre dans « Capacités, traits &amp; dons ».</p>' : ''}`];
+      const lib = LIB_INFO.subclasses[c?.subclass];
+      return [c?.subclass || 'Sous-classe', `${src ? srcLine(src) : ''}
+        ${lib ? `${lib.summary ? `<p>${esc(lib.summary)}</p>` : ''}${lib.features.length ? infoList(lib.features
+          .sort((a, b) => a.level - b.level).map(f => [`Niv. ${f.level} — ${f.name}`, f.summary])) : ''}`
+          : `<p>${esc(STAT_INFO.subclass[1])}</p>
+        ${src && src !== 'phb' ? '<p class="small muted">Capacités à recopier depuis le livre dans « Capacités, traits &amp; dons ».</p>' : ''}`}`];
     }
   }
   return null;
@@ -223,7 +231,8 @@ function renderNav() {
   $nav.innerHTML = `
     <a href="#/groupe" class="${h.startsWith('#/groupe') || h === '' ? 'active' : ''}">Le groupe</a>
     <a href="#/nouveau" class="${h.startsWith('#/nouveau') ? 'active' : ''}">+ Nouveau personnage</a>
-    ${me.role === 'mj' ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>` : ''}
+    ${me.role === 'mj' ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>
+      <a href="#/bibliotheque" class="${h.startsWith('#/bibliotheque') ? 'active' : ''}">Bibliothèque</a>` : ''}
     <a href="#/profil" class="who ${h.startsWith('#/profil') ? 'active' : ''}" title="Mon profil">${esc(me.displayName)}${me.role === 'mj' ? ' <span class="badge gm">MJ</span>' : ''}</a>
     <button class="btn ghost small" id="logout">Déconnexion</button>`;
   $nav.querySelector('#logout').onclick = () => { location.hash = '#/groupe'; store.signOut(); };
@@ -241,6 +250,7 @@ function route() {
   if (h.startsWith('#/nouveau')) return wizardView();
   if (h.startsWith('#/profil')) return profileView();
   if (h.startsWith('#/campagne')) return campaignView();
+  if (h.startsWith('#/bibliotheque')) return libraryView();
   partyView();
 }
 
@@ -485,6 +495,313 @@ function campaignView() {
   });
 }
 
+// ── Bibliothèque du MJ (import de livres) ───────────────────
+
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38';
+const CHUNK_CHARS = 20000;
+const PARALLEL = 3;
+// Claude Opus 5.5 : 4 $ par million d'unités lues, 20 $ par million écrites.
+const PRICE_IN = 4 / 1e6;
+const PRICE_OUT = 20 / 1e6;
+const KIND_LABEL = { class: 'Classe', subclass: 'Sous-classe', species: 'Espèce', background: 'Historique', feat: 'Don' };
+
+async function reloadLibrary() {
+  applyLibrary(await store.listContent().catch(() => []));
+}
+
+async function readPdf(bytes, from, to, onPage) {
+  const pdfjs = await import(`${PDFJS}/pdf.min.mjs`);
+  pdfjs.GlobalWorkerOptions.workerSrc = `${PDFJS}/pdf.worker.min.mjs`;
+  const doc = await pdfjs.getDocument({ data: bytes }).promise;
+  const first = Math.max(1, from || 1);
+  const last = Math.min(doc.numPages, to || doc.numPages);
+  const pages = [];
+  for (let n = first; n <= last; n++) {
+    const content = await (await doc.getPage(n)).getTextContent();
+    pages.push({ page: n, text: content.items.map(i => i.str + (i.hasEOL ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ') });
+    onPage?.(n - first + 1, last - first + 1);
+  }
+  return { pages, total: doc.numPages };
+}
+
+function htmlToText(html) {
+  const marked = html.replace(/<(br|\/p|\/div|\/h[1-6]|\/li|\/tr)[^>]*>/gi, '$&\n');
+  const doc = new DOMParser().parseFromString(marked, 'text/html');
+  doc.querySelectorAll('script, style, noscript').forEach(n => n.remove());
+  return (doc.body?.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Découpe en parties d'environ CHUNK_CHARS caractères, en gardant les numéros de page.
+function makeChunks(pages) {
+  const chunks = [];
+  let cur = { from: null, to: null, text: '' };
+  const push = () => { if (cur.text.trim()) chunks.push(cur); cur = { from: null, to: null, text: '' }; };
+  pages.forEach(({ page, text }) => {
+    for (let i = 0; i < text.length; i += CHUNK_CHARS) {
+      const piece = text.slice(i, i + CHUNK_CHARS);
+      if (cur.text.length + piece.length > CHUNK_CHARS) push();
+      cur.from ??= page;
+      cur.to = page;
+      cur.text += (page ? `\n[Page ${page}]\n` : '\n') + piece;
+    }
+  });
+  push();
+  return chunks;
+}
+
+const itemKey = it => `${it.kind}|${String(it.name).trim().toLowerCase()}`;
+
+// Fusionne les éléments d'une partie avec ceux déjà trouvés (une option peut chevaucher deux parties).
+function mergeItems(acc, items) {
+  items.forEach(raw => {
+    if (!raw?.name?.trim() || !KIND_LABEL[raw.kind]) return;
+    const old = acc.find(x => itemKey(x) === itemKey(raw));
+    if (!old) { acc.push({ ...raw, include: true }); return; }
+    Object.entries(raw).forEach(([k, v]) => {
+      if (k === 'features') {
+        v.forEach(f => {
+          if (!old.features.some(o => o.level === f.level && o.name.toLowerCase() === f.name.toLowerCase())) old.features.push(f);
+        });
+      } else if (Array.isArray(v)) old[k] = [...new Set([...(old[k] ?? []), ...v])];
+      else if ((old[k] === '' || old[k] === 0 || old[k] == null || old[k] === 'none' || old[k] === 'other') && v) old[k] = v;
+      else if (k === 'summary' && v.length > (old.summary?.length ?? 0) * 1.5) old.summary = v;
+    });
+  });
+  return acc;
+}
+
+function estimateCost(chars, parts) {
+  const input = chars / 3.5 + parts * 2500;
+  const output = parts * 3000;
+  const mid = input * PRICE_IN + output * PRICE_OUT;
+  return [mid * 0.6, mid * 1.6];
+}
+const usd = n => `${n < 1 ? n.toFixed(2) : n.toFixed(1)} $`;
+
+function libraryView() {
+  if (me.role !== 'mj') {
+    mount('<section class="card narrow"><h1>Bibliothèque</h1><p>Réservée au MJ.</p></section>');
+    return;
+  }
+  const root = mount('<div class="loading">Chargement…</div>');
+  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cancel: false, log: '' };
+  let saved = [];
+
+  const reviewRow = (it, i) => `<div class="card lib-item ${it.include ? '' : 'off'}">
+      <div class="row">
+        <label class="check"><input type="checkbox" data-inc="${i}" ${it.include ? 'checked' : ''}> garder</label>
+        <select data-it="${i}" data-f="kind">${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${it.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <input data-it="${i}" data-f="name" value="${esc(it.name)}" class="lib-name">
+        ${it.kind === 'subclass' ? `<select data-it="${i}" data-f="parent_class">${CLASSES.filter(c => c.source === 'phb' || c.id === 'artificer').map(c =>
+          `<option value="${c.id}" ${it.parent_class === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+          <option value="other" ${it.parent_class === 'other' ? 'selected' : ''}>Autre : ${esc(it.parent_class_name || '?')}</option></select>` : ''}
+      </div>
+      <textarea data-it="${i}" data-f="summary" rows="2">${esc(it.summary)}</textarea>
+      <p class="small muted">${[
+        it.kind === 'class' && `DV d${it.hit_die || '?'} · JS ${(it.saving_throws ?? []).map(R.abilityShort).join(', ') || '?'} · ${it.skill_count || '?'} compétences · magie : ${{ none: 'aucune', full: 'complète', half: 'semi', third: 'tiers', pact: 'pacte' }[it.spellcasting] ?? it.spellcasting}`,
+        it.kind === 'species' && `Taille ${it.size || '?'} · ${it.speed_m || '?'} m · vision ${it.darkvision_m || 0} m`,
+        it.kind === 'background' && `${(it.ability_options ?? []).map(R.abilityShort).join(', ')} · don : ${it.origin_feat || '?'} · ${(it.skills ?? []).map(x => byId(SKILLS, x)?.name).join(', ')}`,
+        it.features?.length && `${it.features.length} capacité(s) : ${it.features.slice(0, 6).map(f => `${f.name}${f.level > 1 ? ` (niv. ${f.level})` : ''}`).join(', ')}${it.features.length > 6 ? '…' : ''}`,
+      ].filter(Boolean).map(esc).join('<br>')}</p>
+    </div>`;
+
+  function render() {
+    const kept = st.items.filter(x => x.include).length;
+    const byBook = {};
+    saved.forEach(x => (byBook[x.source_title] ??= []).push(x));
+    const [lo, hi] = estimateCost(st.chunks.reduce((n, c) => n + c.text.length, 0), st.chunks.length);
+    root.innerHTML = `
+      <div class="page-head"><div><h1>Bibliothèque</h1>
+        <p class="muted">Importe les livres que tu possèdes : leurs classes, sous-classes, espèces, historiques et dons apparaissent ensuite dans l'assistant et sur les fiches. Les contenus restent privés, visibles seulement par les membres de la campagne.</p></div></div>
+
+      ${st.phase === 'form' ? `<section class="card">
+        <h2>Importer un livre</h2>
+        <form id="lib-form">
+          <label>Titre du livre (affiché comme source)<input name="title" required value="${esc(st.title)}" placeholder="ex. Tasha's Cauldron of Everything"></label>
+          <div class="grid two">
+            <label>Fichier (PDF, ou texte .txt / .md / .html)<input type="file" name="file" accept=".pdf,.txt,.md,.html,.htm,application/pdf,text/*"></label>
+            <label>… ou lien direct vers un PDF ou une page web publique<input name="url" type="url" value="${esc(st.url)}" placeholder="https://…"></label>
+          </div>
+          <div class="row">
+            <label>Pages, de<input type="number" name="from" min="1" value="${esc(st.from)}" class="tiny"></label>
+            <label>à<input type="number" name="to" min="1" value="${esc(st.to)}" class="tiny"></label>
+            <p class="small muted">Facultatif (PDF) : limite l'analyse au chapitre des options de joueur pour réduire le coût.</p>
+          </div>
+          <button class="btn primary">Lire le document</button>
+          <p class="error" id="lib-err">${esc(st.log)}</p>
+        </form>
+      </section>` : ''}
+
+      ${st.phase === 'reading' ? `<section class="card"><h2>Lecture du document…</h2><p class="muted" id="lib-progress">${esc(st.log)}</p></section>` : ''}
+
+      ${st.phase === 'ready' ? `<section class="card">
+        <h2>${esc(st.title)}</h2>
+        <p>${esc(st.log)} → <b>${st.chunks.length}</b> partie${st.chunks.length > 1 ? 's' : ''} à analyser.</p>
+        <p>Coût estimé avec Claude Opus 5.5 : <b>${usd(lo)} à ${usd(hi)}</b> (facturé sur ta clé API Anthropic).</p>
+        <div class="row">
+          <button class="btn primary" data-a="lib-run">Lancer l'extraction</button>
+          <button class="btn ghost" data-a="lib-reset">Annuler</button>
+        </div>
+      </section>` : ''}
+
+      ${st.phase === 'running' || st.phase === 'review' ? `<section class="card">
+        <h2>${esc(st.title)}</h2>
+        <div class="progress"><div style="width:${st.chunks.length ? (st.done / st.chunks.length) * 100 : 0}%"></div></div>
+        <p class="small">${st.done} / ${st.chunks.length} parties · ${st.items.length} élément(s) trouvé(s) · coût réel : ${usd(st.usage.in * PRICE_IN + st.usage.out * PRICE_OUT)}
+          ${st.failed.length ? ` · <span class="error">${st.failed.length} partie(s) en échec</span>` : ''}</p>
+        ${st.log ? `<p class="error">${esc(st.log)}</p>` : ''}
+        ${st.phase === 'running'
+          ? '<button class="btn ghost" data-a="lib-stop">Arrêter</button>'
+          : `<div class="row">${st.failed.length ? '<button class="btn ghost" data-a="lib-retry">Relancer les parties en échec</button>' : ''}
+              <button class="btn ghost" data-a="lib-reset">Abandonner</button></div>`}
+      </section>` : ''}
+
+      ${st.phase === 'review' ? `<section>
+        <h2 class="src-head">Vérification — ${kept} élément(s) gardé(s)</h2>
+        <p class="muted small">Relis et corrige avant d'enregistrer : l'extraction automatique peut se tromper. Les résumés sont reformulés, pas recopiés du livre.</p>
+        ${st.items.length ? st.items.map(reviewRow).join('') : '<p class="muted">Aucune option de joueur trouvée dans ce document.</p>'}
+        <div class="wizard-nav"><span></span><button class="btn primary" data-a="lib-save" ${kept ? '' : 'disabled'}>Enregistrer ${kept} élément(s) dans la campagne</button></div>
+      </section>` : ''}
+
+      <section class="card table-card">
+        <h2>Contenus de la campagne</h2>
+        ${Object.keys(byBook).length ? Object.entries(byBook).map(([book, list]) => `
+          <details class="lib-book"><summary><b>${esc(book)}</b> — ${list.length} élément(s)
+            <button class="btn danger small" data-a="lib-del-book" data-k="${esc(book)}">Supprimer le livre</button></summary>
+            ${Object.entries(KIND_LABEL).map(([k, l]) => {
+              const xs = list.filter(x => x.kind === k);
+              return xs.length ? `<p class="small"><b>${l}s :</b> ${xs.map(x => `${esc(x.name)} <button class="icon" data-a="lib-del" data-k="${x.id}" title="Supprimer">✕</button>`).join(' · ')}</p>` : '';
+            }).join('')}
+          </details>`).join('') : '<p class="muted small">Aucun livre importé pour l\'instant.</p>'}
+      </section>`;
+  }
+
+  async function runParts(indexes) {
+    st.phase = 'running';
+    st.cancel = false;
+    st.log = '';
+    render();
+    const queue = [...indexes];
+    const worker = async () => {
+      while (queue.length && !st.cancel) {
+        const i = queue.shift();
+        let attempt = 0;
+        for (;;) {
+          try {
+            const res = await store.libraryCall({
+              action: 'extract', title: st.title, text: st.chunks[i].text,
+              known: st.items.map(x => ({ kind: x.kind, name: x.name })),
+            });
+            st.usage.in += res.usage?.input_tokens ?? 0;
+            st.usage.out += res.usage?.output_tokens ?? 0;
+            if (res.error) { st.failed.push(i); st.log = `Partie ${i + 1} : ${res.error}`; } else mergeItems(st.items, res.items ?? []);
+            break;
+          } catch (e) {
+            if (e.retry && attempt++ < 2) { await new Promise(r => setTimeout(r, 20000)); continue; }
+            st.failed.push(i);
+            st.log = `Partie ${i + 1} : ${e.message}`;
+            // Erreur de configuration (clé, fonction absente) : inutile de continuer.
+            if (!e.retry) st.cancel = true;
+            break;
+          }
+        }
+        st.done++;
+        render();
+      }
+    };
+    await Promise.all(Array.from({ length: PARALLEL }, worker));
+    queue.forEach(i => st.failed.push(i));
+    st.phase = 'review';
+    render();
+  }
+
+  root.addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    Object.assign(st, { title: f.get('title').trim(), url: f.get('url').trim(), from: f.get('from'), to: f.get('to'), log: '' });
+    const file = f.get('file');
+    if (!file?.size && !st.url) { st.log = 'Choisis un fichier ou colle un lien.'; render(); return; }
+    st.phase = 'reading';
+    render();
+    const progress = t => { const el = root.querySelector('#lib-progress'); if (el) el.textContent = t; };
+    try {
+      let bytes;
+      if (file?.size) bytes = new Uint8Array(await file.arrayBuffer());
+      else {
+        progress('Téléchargement du lien…');
+        bytes = new Uint8Array(await (await store.libraryCall({ action: 'fetch', url: st.url })).arrayBuffer());
+      }
+      const isPdf = String.fromCharCode(...bytes.slice(0, 4)) === '%PDF';
+      let pages;
+      if (isPdf) {
+        const res = await readPdf(bytes, Number(st.from) || 0, Number(st.to) || 0, (n, total) => progress(`Lecture de la page ${n} / ${total}…`));
+        pages = res.pages;
+        const chars = pages.reduce((n, p) => n + p.text.trim().length, 0);
+        if (chars < pages.length * 50) throw new Error('Ce PDF ne contient presque pas de texte (PDF scanné en images ?) : il ne peut pas être analysé.');
+        st.log = `${pages.length} page(s) lue(s) sur ${res.total}`;
+      } else {
+        const raw = new TextDecoder().decode(bytes);
+        const text = /<html|<body|<div|<p[ >]/i.test(raw) ? htmlToText(raw) : raw;
+        pages = [{ page: null, text }];
+        st.log = `${Math.round(text.length / 1000)} 000 caractères lus`;
+      }
+      st.chunks = makeChunks(pages);
+      if (!st.chunks.length) throw new Error('Aucun texte trouvé dans ce document.');
+      Object.assign(st, { phase: 'ready', items: [], done: 0, failed: [], usage: { in: 0, out: 0 } });
+    } catch (ex) {
+      st.phase = 'form';
+      st.log = ex.message;
+    }
+    render();
+  });
+
+  root.addEventListener('click', async e => {
+    const a = e.target.closest('[data-a]');
+    if (!a) return;
+    const { a: act, k } = a.dataset;
+    if (act === 'lib-run') runParts(st.chunks.map((_, i) => i));
+    if (act === 'lib-retry') { const again = st.failed; st.failed = []; st.done -= again.length; runParts(again); }
+    if (act === 'lib-stop') { st.cancel = true; st.log = 'Extraction arrêtée.'; }
+    if (act === 'lib-reset') { Object.assign(st, { phase: 'form', chunks: [], items: [], log: '' }); render(); }
+    if (act === 'lib-save') {
+      a.disabled = true;
+      const rows = st.items.filter(x => x.include).map(({ include, kind, name, ...data }) =>
+        ({ kind, name: name.trim(), source_title: st.title, data }));
+      try {
+        await store.addContent(rows);
+        await reloadLibrary();
+        saved = await store.listContent();
+        Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', from: '', to: '' });
+        toast(`${rows.length} élément(s) ajouté(s) à la campagne.`, 'ok');
+        render();
+      } catch (ex) { toast(ex.message, 'error'); a.disabled = false; }
+    }
+    if (act === 'lib-del' || act === 'lib-del-book') {
+      e.preventDefault();
+      const ids = act === 'lib-del' ? [k] : saved.filter(x => x.source_title === k).map(x => x.id);
+      if (!confirm(act === 'lib-del' ? 'Supprimer cet élément ?' : `Supprimer tout le contenu de « ${k} » ?`)) return;
+      try {
+        await store.deleteContent(ids);
+        await reloadLibrary();
+        saved = await store.listContent();
+        render();
+      } catch (ex) { toast(ex.message, 'error'); }
+    }
+  });
+
+  root.addEventListener('change', e => {
+    const t = e.target;
+    if (t.dataset.inc) { st.items[Number(t.dataset.inc)].include = t.checked; render(); }
+    else if (t.dataset.it) { st.items[Number(t.dataset.it)][t.dataset.f] = t.value; if (t.dataset.f === 'kind') render(); }
+  });
+  root.addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset.it && t.tagName !== 'SELECT') st.items[Number(t.dataset.it)][t.dataset.f] = t.value;
+  });
+
+  store.listContent().then(list => { saved = list; render(); });
+}
+
 // ── Assistant de création ──────────────────────────────────
 
 const PRIORITY = {
@@ -726,7 +1043,7 @@ function wizardView() {
     () => {
       const c = cls();
       const t = totals();
-      const feats = featuresUpTo(c.id, w.level);
+      const feats = featuresUpTo(c.id, w.level, c.libFeatures);
       const vals = scalingValues(c.id, w.level);
       const subs = bySource(c.subclasses.map(n => ({ id: n, name: n, source: c.subclassSources?.[n] ?? c.source })));
       return `<p class="muted">Ton MJ a fixé le niveau de départ à <b>${w.level}</b>. PV, bonus de maîtrise (${R.fmt(R.profBonus(w.level))}),
@@ -1479,9 +1796,10 @@ document.title = `${CAMPAIGN_NAME} — Fiches D&D 5.5`;
 window.addEventListener('hashchange', () => { if (me) route(); else renderNav(); });
 
 store.init().then(() => {
-  store.onAuth(u => {
+  store.onAuth(async u => {
     const changed = (u?.uid ?? null) !== (me?.uid ?? null) || !!u?.noProfile !== !!me?.noProfile;
     me = u;
+    if (u && !u.noProfile && changed) await reloadLibrary();
     if (changed || !u) route();
   });
 }).catch(e => {

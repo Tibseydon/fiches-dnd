@@ -404,3 +404,15 @@ details summary b { color: var(--ink); }
 #nav a.who { color: var(--muted); }
 #nav a.who.active, #nav a.who:hover { color: var(--accent); }
 .wizard-body .mini-abils { margin-top: 16px; }
+
+/* Bibliothèque */
+.progress { height: 10px; background: var(--bg-2); border-radius: 99px; overflow: hidden; margin: 10px 0; }
+.progress div { height: 100%; background: var(--accent); transition: width .3s; }
+.lib-item { margin: 0 0 10px !important; padding: 12px; }
+.lib-item.off { opacity: .5; }
+.lib-item .row { margin-bottom: 8px; }
+.lib-item select { width: auto; }
+.lib-name { flex: 1; min-width: 180px; font-weight: 600; }
+.lib-item .check { margin: 0; }
+.lib-book { margin-top: 10px; }
+.lib-book summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

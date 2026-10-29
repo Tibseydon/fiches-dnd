@@ -76,6 +76,19 @@ Si ta base Supabase a été créée avant cette mise à jour, exécute **une foi
 - **Pseudo** : chaque joueur le change dans « Mon profil » (clic sur son nom en haut à droite). Ses fiches affichent automatiquement le nouveau nom.
 - **Niveau de départ** : le MJ le règle dans l'onglet **Campagne**. Les nouveaux personnages sont créés à ce niveau (PV, maîtrise, emplacements de sorts, ressources et capacités calculés), et l'assistant demande au joueur sa sous-classe et ses améliorations de caractéristiques ou dons. Sorts et autres options restent à remplir sur la fiche.
 
+## Bibliothèque : importer automatiquement les livres du MJ
+
+Le MJ peut déposer le PDF d'un livre qu'il possède (ou un lien direct vers un PDF ou une page web publique) dans l'onglet **Bibliothèque**. Le site lit le texte dans le navigateur, puis une fonction Supabase demande à **Claude Opus 5.5** d'en extraire les classes, sous-classes, espèces, historiques et dons : données de jeu exactes et résumés reformulés en français, jamais le texte du livre recopié. Le MJ vérifie et corrige le résultat avant de l'enregistrer. Les contenus restent dans Supabase, visibles uniquement par les membres de la campagne, et ne sont jamais publiés sur GitHub.
+
+**Installation (une fois) :**
+
+1. **Base** : exécute [`maj-bibliotheque.sql`](maj-bibliotheque.sql) dans Supabase → **SQL Editor → New query → Run**.
+2. **Clé API** : sur <https://console.anthropic.com>, crée un compte, ajoute un peu de crédit (*Billing*), puis crée une clé (*API Keys*). Elle commence par `sk-ant-`. Ne la mets jamais dans le code du site.
+3. **Secret** : Supabase → **Edge Functions → Secrets** → ajoute `ANTHROPIC_API_KEY` avec ta clé.
+4. **Fonction** : Supabase → **Edge Functions → Deploy a new function → Via Editor**, nomme-la exactement `extraire-livre`, remplace tout le code par celui de [`edge-function/index.ts`](edge-function/index.ts), puis **Deploy**. Laisse l'option *Verify JWT* activée.
+
+**Coût** : facturé sur ta clé Anthropic. Le site affiche une estimation avant de lancer, puis le coût réel. Compte quelques dollars pour un livre complet de 300 pages ; indique une plage de pages (le chapitre des options de joueur) pour payer moins. Les PDF scannés (images sans texte) ne peuvent pas être lus.
+
 ## Extensions incluses
 
 En plus du Manuel des joueurs 2024, l'assistant de création et la fiche proposent les classes, sous-classes et espèces de :

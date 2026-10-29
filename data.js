@@ -1,5 +1,5 @@
 // Données de règles D&D 5.5 (Manuel des joueurs 2024), en français.
-import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js?v=202610291009';
+import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js?v=202610291038';
 
 export { SOURCES };
 
@@ -294,3 +294,108 @@ CLASSES.forEach(c => {
 SPECIES.forEach(s => (s.source = 'phb'));
 SPECIES.push(...EXTRA_SPECIES);
 Object.entries(EXTRA_LINEAGES).forEach(([id, l]) => byId(SPECIES, id).lineages.push(...l));
+
+// ── Contenus importés par le MJ (bibliothèque Supabase) ─────
+// Les données importées s'ajoutent aux listes ci-dessus après la connexion.
+
+const cloneClass = c => ({ ...c, subclasses: [...c.subclasses], subclassSources: { ...c.subclassSources } });
+const BASE = {
+  classes: CLASSES.map(cloneClass),
+  species: [...SPECIES],
+  backgrounds: [...BACKGROUNDS],
+  feats: { ...FEATS },
+  sources: { ...SOURCES },
+};
+const ALL_SKILL_IDS = SKILLS.map(s => s.id);
+const ABILITY_IDS = ABILITIES.map(a => a.id);
+
+// Infos des contenus importés, lues par les fiches d'aide.
+export const LIB_INFO = { feats: {}, subclasses: {} };
+
+export const slugify = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+// Insère avant l'option « personnalisée » qui reste en fin de liste.
+const insertBeforeCustom = (list, item) => {
+  const i = list.findIndex(x => x.id === 'custom');
+  list.splice(i < 0 ? list.length : i, 0, item);
+};
+const featureLabel = f => (f.level > 1 ? `${f.name} (niv. ${f.level})` : f.name);
+
+export function applyLibrary(items = []) {
+  CLASSES.splice(0, CLASSES.length, ...BASE.classes.map(cloneClass));
+  SPECIES.splice(0, SPECIES.length, ...BASE.species);
+  BACKGROUNDS.splice(0, BACKGROUNDS.length, ...BASE.backgrounds);
+  Object.keys(FEATS).forEach(k => { if (!(k in BASE.feats)) delete FEATS[k]; });
+  Object.keys(SOURCES).forEach(k => delete SOURCES[k]);
+  const { custom, ...rest } = BASE.sources;
+  Object.assign(SOURCES, rest);
+  LIB_INFO.feats = {};
+  LIB_INFO.subclasses = {};
+
+  const featKey = name => {
+    const existing = Object.entries(FEATS).find(([, n]) => n.toLowerCase() === name.trim().toLowerCase());
+    if (existing) return existing[0];
+    const key = `lib-feat-${slugify(name)}`;
+    FEATS[key] = name.trim();
+    return key;
+  };
+  const order = ['class', 'species', 'feat', 'background', 'subclass'];
+  [...items].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)).forEach(it => {
+    const d = it.data ?? {};
+    const source = `lib:${it.source_title}`;
+    SOURCES[source] = it.source_title;
+    const features = (d.features ?? []).filter(f => f.name);
+    const id = `lib-${slugify(it.name)}`;
+    if (it.kind === 'class' && !byId(CLASSES, id)) {
+      insertBeforeCustom(CLASSES, {
+        id, name: it.name, source, imported: true,
+        hd: [6, 8, 10, 12].includes(d.hit_die) ? d.hit_die : 8,
+        primary: d.primary_ability || '—',
+        saves: (d.saving_throws ?? []).filter(a => ABILITY_IDS.includes(a)),
+        skillCount: d.skill_count > 0 ? d.skill_count : 2,
+        skills: d.skill_options?.length ? d.skill_options.filter(s => ALL_SKILL_IDS.includes(s)) : ALL_SKILL_IDS,
+        caster: { full: 'full', half: 'half', pact: 'pact' }[d.spellcasting] ?? null,
+        spellAb: d.spell_ability || null,
+        armor: d.armor || '', weapons: d.weapons || '', tools: d.tools || '',
+        features: features.filter(f => f.level <= 1).map(f => f.name).join(', '),
+        libFeatures: features,
+        resources: [], subclasses: [], subclassSources: {},
+        desc: d.summary || '',
+      });
+    } else if (it.kind === 'subclass') {
+      const parent = d.parent_class && d.parent_class !== 'other'
+        ? byId(CLASSES, d.parent_class)
+        : CLASSES.find(c => c.name.toLowerCase() === String(d.parent_class_name ?? '').trim().toLowerCase());
+      if (!parent) return;
+      if (!parent.subclasses.includes(it.name)) parent.subclasses.push(it.name);
+      parent.subclassSources[it.name] = source;
+      LIB_INFO.subclasses[it.name] = { summary: d.summary || '', features };
+    } else if (it.kind === 'species' && !byId(SPECIES, id)) {
+      insertBeforeCustom(SPECIES, {
+        id, name: it.name, source, imported: true,
+        speed: d.speed_m > 0 ? d.speed_m : 9,
+        size: d.size || '—',
+        darkvision: d.darkvision_m || 0,
+        traits: features.map(featureLabel).join(', '),
+        traitsInfo: features.map(f => [featureLabel(f), f.summary]),
+        desc: d.summary || '',
+      });
+    } else if (it.kind === 'feat') {
+      const key = featKey(it.name);
+      const prereq = features.find(f => /pr[ée]requis/i.test(f.name));
+      LIB_INFO.feats[key] = [d.summary, prereq && `Prérequis : ${prereq.summary}`].filter(Boolean).join(' ');
+    } else if (it.kind === 'background' && !byId(BACKGROUNDS, id)) {
+      const abilities = (d.ability_options ?? []).filter(a => ABILITY_IDS.includes(a));
+      BACKGROUNDS.push({
+        id, name: it.name, source, imported: true,
+        abilities: abilities.length >= 2 ? abilities : [...ABILITY_IDS],
+        feat: d.origin_feat ? featKey(d.origin_feat) : 'skilled',
+        skills: (d.skills ?? []).filter(s => ALL_SKILL_IDS.includes(s)).slice(0, 2),
+        tool: d.tools || '—',
+        desc: d.summary || '',
+      });
+    }
+  });
+  SOURCES.custom = custom;
+}

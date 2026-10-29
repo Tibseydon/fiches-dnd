@@ -2,8 +2,8 @@
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, FEATS,
   FULL_CASTER_SLOTS, PACT_SLOTS, byId,
-} from './data.js?v=202610291009';
-import { PROGRESSION, featuresUpTo, scalingValues, resourcesAt } from './progression.js?v=202610291009';
+} from './data.js?v=202610291038';
+import { PROGRESSION, featuresUpTo, scalingValues, resourcesAt } from './progression.js?v=202610291038';
 
 export const mod = score => Math.floor((score - 10) / 2);
 export const fmt = n => (n >= 0 ? `+${n}` : `${n}`);
@@ -153,7 +153,7 @@ export function choiceBonus(choices = []) {
 
 // Texte « progression » ajouté aux capacités de la fiche.
 export function progressionText(classId, level, choices = []) {
-  const lines = featuresUpTo(classId, level).map(([l, names]) => `Niv. ${l} : ${names.join(', ')}`);
+  const lines = featuresUpTo(classId, level, byId(CLASSES, classId)?.libFeatures).map(([l, names]) => `Niv. ${l} : ${names.join(', ')}`);
   const vals = scalingValues(classId, level);
   if (vals.length) lines.push(`Au niveau ${level} : ${vals.join(' · ')}`);
   choices.filter(ch => ch.kind !== 'asi' && ch.feat?.trim()).forEach(ch =>
