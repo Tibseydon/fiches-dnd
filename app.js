@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291331';
-import { CAMPAIGN_NAME } from './config.js?v=202610291331';
+import * as store from './store.js?v=202610291338';
+import { CAMPAIGN_NAME } from './config.js?v=202610291338';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, byId,
-} from './data.js?v=202610291331';
-import * as R from './rules.js?v=202610291331';
+} from './data.js?v=202610291338';
+import * as R from './rules.js?v=202610291338';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291331';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291331';
+} from './info.js?v=202610291338';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291338';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -586,7 +586,7 @@ function libraryView() {
     return;
   }
   const root = mount('<div class="loading">Chargement…</div>');
-  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cost: 0, cancel: false, log: '', model: 'claude-haiku-5-5' };
+  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cost: 0, cancel: false, log: '', model: 'claude-haiku-5-5', paste: '' };
   let saved = [];
 
   const reviewRow = (it, i) => `<div class="card lib-item ${it.include ? '' : 'off'}">
@@ -624,6 +624,8 @@ function libraryView() {
             <label>Fichier (PDF, ou texte .txt / .md / .html)<input type="file" name="file" accept=".pdf,.txt,.md,.html,.htm,application/pdf,text/*"></label>
             <label>… ou lien direct vers un PDF ou une page web publique<input name="url" type="url" value="${esc(st.url)}" placeholder="https://…"></label>
           </div>
+          <label>… ou colle le texte du document (ouvre-le dans ton navigateur, Ctrl + A puis Ctrl + C, et colle ici)
+            <textarea name="paste" rows="5" placeholder="Texte copié depuis un Google Doc, une page web, un PDF ouvert dans le navigateur…">${esc(st.paste)}</textarea></label>
           <div class="row">
             <label>Pages, de<input type="number" name="from" min="1" value="${esc(st.from)}" class="tiny"></label>
             <label>à<input type="number" name="to" min="1" value="${esc(st.to)}" class="tiny"></label>
@@ -720,11 +722,12 @@ function libraryView() {
   root.addEventListener('submit', async e => {
     e.preventDefault();
     const f = new FormData(e.target);
-    Object.assign(st, { title: f.get('title').trim(), url: f.get('url').trim(), from: f.get('from'), to: f.get('to'), log: '' });
+    Object.assign(st, { title: f.get('title').trim(), url: f.get('url').trim(), paste: f.get('paste'), from: f.get('from'), to: f.get('to'), log: '' });
     const file = f.get('file');
-    if (!file?.size && !st.url) { st.log = 'Choisis un fichier ou colle un lien.'; render(); return; }
+    const pasted = st.paste.trim();
+    if (!file?.size && !st.url && !pasted) { st.log = 'Choisis un fichier, colle un lien ou colle le texte du document.'; render(); return; }
     // Liseuses en ligne : elles ne fournissent pas de fichier téléchargeable.
-    if (!file?.size && /(^|\.)(scribd\.com|anyflip\.com|issuu\.com|fliphtml5\.com|yumpu\.com)$/i.test((() => { try { return new URL(st.url).hostname; } catch { return ''; } })())) {
+    if (!file?.size && !pasted && /(^|\.)(scribd\.com|anyflip\.com|issuu\.com|fliphtml5\.com|yumpu\.com)$/i.test((() => { try { return new URL(st.url).hostname; } catch { return ''; } })())) {
       st.log = "Ce site affiche les documents dans une liseuse et ne permet pas de les télécharger automatiquement. Importe plutôt le PDF de ton livre avec « Fichier ».";
       render();
       return;
@@ -733,6 +736,13 @@ function libraryView() {
     render();
     const progress = t => { const el = root.querySelector('#lib-progress'); if (el) el.textContent = t; };
     try {
+      if (!file?.size && pasted) {
+        st.chunks = makeChunks([{ page: null, text: pasted }]);
+        st.model = (await store.libraryCall({ action: 'info' }).catch(() => null))?.model ?? st.model;
+        Object.assign(st, { phase: 'ready', items: [], done: 0, failed: [], cost: 0, log: `${pasted.length.toLocaleString('fr-FR')} caractères collés` });
+        render();
+        return;
+      }
       let bytes;
       if (file?.size) bytes = new Uint8Array(await file.arrayBuffer());
       else {
@@ -781,7 +791,7 @@ function libraryView() {
         await store.addContent(rows);
         await reloadLibrary();
         saved = await store.listContent();
-        Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', from: '', to: '' });
+        Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', paste: '', from: '', to: '' });
         toast(`${rows.length} élément(s) ajouté(s) à la campagne.`, 'ok');
         render();
       } catch (ex) { toast(ex.message, 'error'); a.disabled = false; }

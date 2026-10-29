@@ -416,3 +416,5 @@ details summary b { color: var(--ink); }
 .lib-item .check { margin: 0; }
 .lib-book { margin-top: 10px; }
 .lib-book summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+#lib-form textarea { font-size: .9rem; }
