@@ -2,7 +2,7 @@ import * as store from './store.js';
 import { CAMPAIGN_NAME } from './config.js';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
-  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, byId,
+  STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, byId,
 } from './data.js';
 import * as R from './rules.js';
 
@@ -50,6 +50,13 @@ function setPath(obj, path, val) {
 
 function initials(name) {
   return (name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+}
+
+// Regroupe une liste (classes, espèces) par livre source, dans l'ordre de SOURCES.
+function bySource(list) {
+  return Object.keys(SOURCES)
+    .map(src => [src, list.filter(x => x.source === src)])
+    .filter(([, items]) => items.length);
 }
 
 function portrait(c, cls = '') {
@@ -255,7 +262,7 @@ function partyTable(list) {
         const sp = R.spellInfo(c);
         const pp = R.passive(c, 'perception');
         return `<tr>
-          <td><a href="#/perso/${esc(c.id)}">${esc(c.name)}</a><div class="muted small">${esc(byId(CLASSES, c.classId)?.name ?? '')}</div></td>
+          <td><a href="#/perso/${esc(c.id)}">${esc(c.name)}</a><div class="muted small">${esc(R.classOf(c)?.name ?? '')}</div></td>
           <td>${esc(c.level)}</td>
           <td class="nowrap">${esc(c.hp?.current)}/${esc(c.hp?.max)}${c.hp?.temp ? ` <small>+${esc(c.hp.temp)}</small>` : ''}</td>
           <td>${esc(c.ac)}</td>
@@ -301,6 +308,7 @@ function wizardView() {
     base: { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 },
     classSkills: [], keenSense: '', skillful: '',
     name: '', level: 1, alignment: '', portrait: '', personality: '', backstory: '',
+    customClassName: '', customSpeciesName: '', source: 'all',
   };
   const root = mount('');
 
@@ -330,8 +338,9 @@ function wizardView() {
 
   function valid() {
     switch (w.step) {
-      case 0: return !!w.classId;
-      case 1: return !!w.speciesId && (!sp().lineages || !!w.lineage);
+      case 0: return !!w.classId && (w.classId !== 'custom' || !!w.customClassName.trim());
+      case 1: return !!w.speciesId && (!sp().lineages || !!w.lineage)
+        && (w.speciesId !== 'custom' || !!w.customSpeciesName.trim());
       case 2: return !!w.backgroundId && (w.bgMode === '111' || (w.bgPicks[0] && w.bgPicks[1] && w.bgPicks[0] !== w.bgPicks[1]));
       case 3: return w.method !== 'pointbuy' || pbSpent() <= POINT_BUY_BUDGET;
       case 4: return w.classSkills.length === cls().skillCount
@@ -346,21 +355,45 @@ function wizardView() {
       <h3>${esc(o.name)}</h3>${body}
     </button>`;
 
+  // Filtre par livre + cartes groupées par livre.
+  const sourcePicker = list => {
+    const used = bySource(list).map(([src]) => src);
+    return `<label class="source-filter">Livre
+      <select data-w="source"><option value="all">Tous les livres</option>
+        ${used.map(src => `<option value="${src}" ${w.source === src ? 'selected' : ''}>${esc(SOURCES[src])}</option>`).join('')}
+      </select></label>`;
+  };
+  // Un livre sans contenu pour cette étape (ex. pas d'espèce) revient à « Tous ».
+  const groupedCards = (list, field, body) => bySource(list)
+    .filter(([src], _, all) => !all.some(([x]) => x === w.source) || w.source === src)
+    .map(([src, items]) => `<h3 class="src-head">${esc(SOURCES[src])}</h3>
+      <div class="grid options">${items.map(o => optionCard(field, o, body(o))).join('')}</div>`).join('');
+  const verifyBadge = '<span class="badge warn" title="Données non confirmées : à ajuster sur la fiche">à vérifier</span>';
+
   const steps = [
-    () => `<p class="muted">Choisis la classe de ton personnage.</p>
-      <div class="grid options">${CLASSES.map(c => optionCard('classId', c, `
+    () => `<div class="row spread"><p class="muted">Choisis la classe de ton personnage.</p>${sourcePicker(CLASSES)}</div>
+      ${groupedCards(CLASSES, 'classId', c => `
         <p>${esc(c.desc)}</p>
         <div class="tags">
           <span class="badge">DV d${c.hd}</span>
-          <span class="badge">${esc(c.primary)}</span>
-          <span class="badge">JS ${c.saves.map(R.abilityShort).join(', ')}</span>
+          ${c.primary !== '—' ? `<span class="badge">${esc(c.primary)}</span>` : ''}
+          ${c.saves.length ? `<span class="badge">JS ${c.saves.map(R.abilityShort).join(', ')}</span>` : ''}
           ${c.spellAb ? `<span class="badge magic">Sorts (${R.abilityShort(c.spellAb)})</span>` : ''}
-        </div>`)).join('')}</div>`,
+          ${c.verify ? verifyBadge : ''}
+        </div>`)}
+      ${w.classId === 'custom' ? `<div class="card sub-choice">
+        <label>Nom de la classe<input data-w="customClassName" value="${esc(w.customClassName)}" maxlength="40" placeholder="ex. Blood Hunter"></label>
+        <p class="small muted">Tu régleras le dé de vie, les jets de sauvegarde et la magie dans « Réglages de classe » sur la fiche.</p>
+      </div>` : ''}
+      ${cls()?.verify && w.classId !== 'custom' ? `<p class="notice wide">Les données de cette classe (dé de vie, jets de sauvegarde, compétences, magie) ne sont pas toutes confirmées. Vérifie-les dans ton livre et ajuste-les dans « Réglages de classe » sur la fiche.</p>` : ''}`,
 
-    () => `<p class="muted">Choisis l'espèce de ton personnage. En 5.5, l'espèce ne donne plus de bonus de caractéristiques : ceux-ci viennent de l'historique.</p>
-      <div class="grid options">${SPECIES.map(s => optionCard('speciesId', s, `
-        <div class="tags"><span class="badge">Taille ${esc(s.size)}</span><span class="badge">${String(s.speed).replace('.', ',')} m</span></div>
-        <p class="small">${esc(s.traits)}</p>`)).join('')}</div>
+    () => `<div class="row spread"><p class="muted">Choisis l'espèce de ton personnage. En 5.5, l'espèce ne donne plus de bonus de caractéristiques : ceux-ci viennent de l'historique.</p>${sourcePicker(SPECIES)}</div>
+      ${groupedCards(SPECIES, 'speciesId', s => `
+        <div class="tags">${s.size !== '—' ? `<span class="badge">Taille ${esc(s.size)}</span>` : ''}<span class="badge">${String(s.speed).replace('.', ',')} m</span></div>
+        <p class="small">${esc(s.traits || s.desc || '')}</p>`)}
+      ${w.speciesId === 'custom' ? `<div class="card sub-choice">
+        <label>Nom de l'espèce<input data-w="customSpeciesName" value="${esc(w.customSpeciesName)}" maxlength="40"></label>
+      </div>` : ''}
       ${sp()?.lineages ? `<div class="card sub-choice">
         <label>${esc(sp().lineageLabel)}
           <select data-w="lineage"><option value="">— Choisir —</option>
@@ -466,7 +499,7 @@ function wizardView() {
           <h3>Récapitulatif</h3>
           ${(() => {
             const preview = R.buildCharacter({ ...w, name: w.name || '?', bgBonus: bgBonus(), extraSkills: extraSkills() });
-            return `<p><b>${esc(cls().name)}</b> · ${esc(sp().name)}${w.lineage ? ` (${esc(w.lineage)})` : ''} · ${esc(bg().name)}</p>
+            return `<p><b>${esc(R.classOf(preview).name)}</b> · ${esc(R.speciesName(preview))}${w.lineage ? ` (${esc(w.lineage)})` : ''} · ${esc(bg().name)}</p>
               <div class="mini-stats">
                 <div><b>${preview.hp.max}</b><span>PV max</span></div>
                 <div><b>${preview.ac}</b><span>CA</span></div>
@@ -576,7 +609,7 @@ function wizardView() {
       w.skillful = t.value;
     } else if (t.dataset.w) {
       w[t.dataset.w] = t.dataset.w === 'level' ? Number(t.value) : t.value;
-      if (['lineage', 'level'].includes(t.dataset.w)) render();
+      if (['lineage', 'level', 'source'].includes(t.dataset.w)) render();
       refreshNav();
       return;
     } else return;
@@ -584,7 +617,10 @@ function wizardView() {
   });
 
   root.addEventListener('input', e => {
-    if (e.target.dataset.w === 'name') { w.name = e.target.value; refreshNav(); }
+    if (['name', 'customClassName', 'customSpeciesName'].includes(e.target.dataset.w)) {
+      w[e.target.dataset.w] = e.target.value;
+      refreshNav();
+    }
   });
 
   render();
@@ -601,6 +637,7 @@ function sheetView(id) {
   let saveTimer = null;
   let saving = false;
   let canEdit = false;
+  let settingsOpen = null; // panneau « Réglages de classe » ouvert par le joueur
 
   const dis = () => (canEdit ? '' : 'disabled');
   const val = p => getPath(c, p) ?? '';
@@ -611,6 +648,11 @@ function sheetView(id) {
   const sel = (p, opts, { rerender = true, empty = true, emptyLabel = '—' } = {}) =>
     `<select data-p="${p}" ${rerender ? 'data-r' : ''} ${dis()}>${empty ? `<option value="">${esc(emptyLabel)}</option>` : ''}${opts.map(([v, l]) =>
       `<option value="${esc(v)}" ${String(val(p)) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  // Liste déroulante groupée par livre (classes, espèces).
+  const selGrouped = (p, list) =>
+    `<select data-p="${p}" data-r ${dis()}>${bySource(list).map(([src, items]) =>
+      `<optgroup label="${esc(SOURCES[src])}">${items.map(x =>
+        `<option value="${esc(x.id)}" ${val(p) === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
   const pips = (n, filled, act, extra = '') => Array.from({ length: n }, (_, i) =>
     `<button class="pip ${i < filled ? 'on' : ''}" data-a="${act}" data-n="${i + 1}" ${extra} ${dis()}></button>`).join('');
 
@@ -655,7 +697,7 @@ function sheetView(id) {
     d['ac-sug'] = R.suggestedAC(c);
     d['hp-sug'] = R.suggestedMaxHP(c);
     d.label = R.labelFor(c);
-    const cls = byId(CLASSES, c.classId);
+    const cls = R.classOf(c);
     d.hd = `${Math.max(0, c.level - (Number(c.hitDiceUsed) || 0))} / ${c.level} d${cls?.hd ?? '?'}`;
     const sp = R.spellInfo(c);
     d.dc = sp ? sp.dc : '—';
@@ -673,7 +715,7 @@ function sheetView(id) {
   // ── Blocs de la fiche ──
 
   function header() {
-    const cls = byId(CLASSES, c.classId);
+    const cls = R.classOf(c);
     const sp = byId(SPECIES, c.speciesId);
     return `<header class="sheet-head card">
       ${portrait(c, 'big')}
@@ -681,11 +723,14 @@ function sheetView(id) {
         <input class="char-name" data-p="name" value="${esc(c.name)}" ${dis()} aria-label="Nom du personnage">
         <div class="muted"><span data-d="label"></span>${c.subclass ? ` — ${esc(c.subclass)}` : ''} · joué par ${esc(c.ownerName)}</div>
         <div class="sh-fields">
-          <label>Classe ${sel('classId', CLASSES.map(x => [x.id, x.name]), { empty: false })}</label>
+          <label>Classe ${selGrouped('classId', CLASSES)}</label>
+          ${c.classId === 'custom' ? `<label>Nom de la classe ${inp('customClassName')}</label>` : ''}
           <label>Sous-classe <input data-p="subclass" list="subclasses" value="${esc(c.subclass)}" ${dis()} placeholder="${c.level >= 3 ? 'Niveau 3+' : 'Au niveau 3'}">
-            <datalist id="subclasses">${(cls?.subclasses ?? []).map(s => `<option value="${esc(s)}">`).join('')}</datalist></label>
+            <datalist id="subclasses">${(cls?.subclasses ?? []).map(s =>
+              `<option value="${esc(s)}" label="${esc(SOURCES[cls.subclassSources?.[s]] ?? '')}">`).join('')}</datalist></label>
           <label>Niveau ${inp('level', { type: 'number', attrs: 'min="1" max="20" data-r' })}</label>
-          <label>Espèce ${sel('speciesId', SPECIES.map(x => [x.id, x.name]), { empty: false })}</label>
+          <label>Espèce ${selGrouped('speciesId', SPECIES)}</label>
+          ${c.speciesId === 'custom' ? `<label>Nom de l'espèce ${inp('customSpeciesName')}</label>` : ''}
           ${sp?.lineages ? `<label>${esc(sp.lineageLabel)} ${sel('lineage', sp.lineages.map(l => [l, l]), { rerender: false })}</label>` : ''}
           <label>Historique ${sel('backgroundId', BACKGROUNDS.map(x => [x.id, x.name]), { empty: false })}</label>
           <label>Alignement ${sel('alignment', ALIGNMENTS.map(a => [a, a]), { rerender: false })}</label>
@@ -722,7 +767,7 @@ function sheetView(id) {
       <h2>Caractéristiques</h2>
       <div class="abilities">${ABILITIES.map(a => {
         const prof = R.saveProficient(c, a.id);
-        const classSave = byId(CLASSES, c.classId)?.saves.includes(a.id);
+        const classSave = R.classOf(c)?.saves.includes(a.id);
         const bonusTxt = [c.bgBonus?.[a.id] ? `historique +${c.bgBonus[a.id]}` : '', c.otherBonus?.[a.id] ? `autres ${R.fmt(c.otherBonus[a.id])}` : ''].filter(Boolean).join(', ');
         return `<div class="ability">
           <span class="lbl" title="${a.name}">${a.short}</span>
@@ -811,8 +856,31 @@ function sheetView(id) {
     </section>`;
   }
 
-  function featuresBlock() {
+  function classSettingsBlock() {
+    const cls = R.classOf(c);
+    if (!cls) return '';
+    const o = c.classOverride ?? {};
+    const changed = Object.keys(o).length > 0;
     return `<section class="card">
+      <details id="class-settings" ${settingsOpen ?? cls.verify ? 'open' : ''}>
+        <summary><b>Réglages de classe</b>${cls.verify ? ' <span class="badge warn">à vérifier</span>' : ''}${changed ? ' <span class="badge">modifiés</span>' : ''}</summary>
+        ${cls.verify ? `<p class="small muted">Ces données ne sont pas toutes confirmées pour ${esc(cls.name)}${cls.source !== 'custom' ? ` (${esc(SOURCES[cls.source])})` : ''} : vérifie-les dans ton livre.</p>` : ''}
+        <label>Dé de vie
+          <select data-p="classOverride.hd" data-t="num" data-r ${dis()}>${[6, 8, 10, 12].map(n =>
+            `<option value="${n}" ${cls.hd === n ? 'selected' : ''}>d${n}</option>`).join('')}</select></label>
+        <span class="lbl">Jets de sauvegarde de classe</span>
+        <div class="chips">${ABILITIES.map(a => `<button class="chip ${cls.saves.includes(a.id) ? 'on' : ''}" data-a="ovsave" data-k="${a.id}" ${dis()}>${a.short}</button>`).join('')}</div>
+        <label>Magie
+          <select data-p="classOverride.caster" data-r ${dis()}>${[['', 'Aucune'], ['full', 'Lanceur complet'], ['half', 'Semi-lanceur'], ['pact', 'Magie de pacte']].map(([v, l]) =>
+            `<option value="${v}" ${(cls.caster ?? '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <p class="small muted">La caractéristique d'incantation se règle dans l'onglet Sorts.</p>
+        ${canEdit && changed ? '<button class="btn ghost small" data-a="ovreset">Revenir aux valeurs par défaut</button>' : ''}
+      </details>
+    </section>`;
+  }
+
+  function featuresBlock() {
+    return `${classSettingsBlock()}<section class="card">
       <h2>Capacités, traits &amp; dons</h2>
       <label>Don d'origine ${sel('originFeat', Object.entries(FEATS), { rerender: true })}</label>
       ${area('features', 10, 'Capacités de classe, traits d\'espèce, dons…')}
@@ -836,7 +904,7 @@ function sheetView(id) {
   function spellsTab() {
     const slots = R.spellSlots(c);
     const used = c.slotsUsed ?? Array(9).fill(0);
-    const cls = byId(CLASSES, c.classId);
+    const cls = R.classOf(c);
     const spells = (c.spells ?? []).map((s, i) => ({ ...s, i }));
     const levels = [...new Set(spells.map(s => Number(s.level) || 0))].sort((a, b) => a - b);
     return `<div class="top-stats">
@@ -908,6 +976,11 @@ function sheetView(id) {
 
   const toNum = v => (v === '' ? 0 : Number(v));
 
+  // « toggle » ne remonte pas : on l'écoute en phase de capture.
+  root.addEventListener('toggle', e => {
+    if (e.target.id === 'class-settings') settingsOpen = e.target.open;
+  }, true);
+
   root.addEventListener('input', e => {
     const t = e.target;
     if (!canEdit || !c) return;
@@ -928,6 +1001,8 @@ function sheetView(id) {
     if (!canEdit || !c) return;
     if (t.dataset.p === 'level') c.level = Math.min(20, Math.max(1, toNum(t.value) || 1));
     if (t.dataset.p === 'speciesId') c.lineage = '';
+    // Nouvelle classe : on repart de ses valeurs par défaut.
+    if (t.dataset.p === 'classId') { delete c.classOverride; c.subclass = ''; }
     if (t.hasAttribute('data-r')) render();
     save(200);
   });
@@ -962,6 +1037,13 @@ function sheetView(id) {
         break;
       }
       case 'insp': c.inspiration = !c.inspiration; break;
+      case 'ovsave': {
+        const saves = new Set(R.classOf(c).saves);
+        saves.has(k) ? saves.delete(k) : saves.add(k);
+        c.classOverride = { ...c.classOverride, saves: ABILITIES.map(a => a.id).filter(a => saves.has(a)) };
+        break;
+      }
+      case 'ovreset': delete c.classOverride; break;
       case 'cond': {
         const s = new Set(c.conditions ?? []);
         s.has(k) ? s.delete(k) : s.add(k);

@@ -69,6 +69,17 @@ Envoie-leur l'adresse du site et le **code de campagne**. Sans ce code, l'inscri
 
 ---
 
+## Extensions incluses
+
+En plus du Manuel des joueurs 2024, l'assistant de création et la fiche proposent les classes, sous-classes et espèces de :
+
+- **Officiel** : Eberron : Forge of the Artificer (Artificier et ses sous-classes, espèces d'Eberron), Frontiers of Eberron : Quickstone, Forgotten Realms : Heroes of Faerûn, Astarion's Book of Hungers, Lorwyn : First Light, Ravenloft : The Horrors Within, Arcana Unleashed.
+- **Tiers** : Valda's Spire of Secrets, Gunslinger, Steinhardt's Guide to the Eldritch Hunt, Northlands Worldbook, Illrigger (MCDM), Grim Hollow : Player's Guide, Sebastian Crowe's Guide to Drakkenheim, The Crooked Moon.
+
+Seules les données de jeu (noms, dé de vie, jets de sauvegarde…) sont reprises, pas le texte des livres : les traits des espèces et capacités des classes d'extension sont à recopier depuis ton livre. Les classes marquées **« à vérifier »** ont des données non confirmées ; chaque joueur peut ajuster le dé de vie, les jets de sauvegarde et la magie dans **Réglages de classe** sur sa fiche. Les options **Autre classe / Autre espèce (personnalisée)** couvrent tout ce qui manque.
+
+La liste se trouve dans `extensions.js`.
+
 ## Mode local (test)
 
 Tant que `SUPABASE_URL` et `SUPABASE_KEY` sont vides dans `js/config.js`, le site fonctionne en **mode local** : comptes et fiches sont enregistrés uniquement dans le navigateur (le premier compte créé est MJ). Pratique pour essayer, mais **rien n'est partagé** avec le groupe.

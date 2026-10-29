@@ -346,3 +346,11 @@ summary { cursor: pointer; color: var(--muted); }
   .card { box-shadow: none; break-inside: avoid; }
   main { padding: 0; }
 }
+
+/* ── Extensions ── */
+.src-head { margin: 22px 0 10px; font-size: .95rem; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.source-filter { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.source-filter select { width: auto; max-width: 260px; }
+.notice.wide { max-width: none; margin: 14px 0 0; }
+details summary b { color: var(--ink); }
+#class-settings .chips { margin-bottom: 12px; }

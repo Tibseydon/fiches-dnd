@@ -8,6 +8,27 @@ export const mod = score => Math.floor((score - 10) / 2);
 export const fmt = n => (n >= 0 ? `+${n}` : `${n}`);
 export const profBonus = level => 2 + Math.floor((Math.max(1, level) - 1) / 4);
 
+// Classe du personnage, avec les réglages faits sur la fiche
+// (classe personnalisée ou données d'extension à vérifier).
+export function classOf(c) {
+  const base = byId(CLASSES, c.classId);
+  if (!base) return null;
+  const o = c.classOverride ?? {};
+  return {
+    ...base,
+    name: c.classId === 'custom' && c.customClassName ? c.customClassName : base.name,
+    hd: Number(o.hd) || base.hd,
+    saves: Array.isArray(o.saves) ? o.saves : base.saves,
+    caster: o.caster !== undefined ? o.caster || null : base.caster,
+    spellAb: o.spellAb !== undefined ? o.spellAb || null : base.spellAb,
+  };
+}
+
+export function speciesName(c) {
+  const sp = byId(SPECIES, c.speciesId);
+  return c.speciesId === 'custom' && c.customSpeciesName ? c.customSpeciesName : sp?.name;
+}
+
 export function score(c, ab) {
   return (c.base?.[ab] ?? 10) + (c.bgBonus?.[ab] ?? 0) + (c.otherBonus?.[ab] ?? 0);
 }
@@ -17,7 +38,7 @@ export function abilityMod(c, ab) {
 }
 
 export function saveProficient(c, ab) {
-  const cls = byId(CLASSES, c.classId);
+  const cls = classOf(c);
   return (cls?.saves.includes(ab) ?? false) || (c.extraSaves ?? []).includes(ab);
 }
 
@@ -54,7 +75,7 @@ export function suggestedAC(c) {
 }
 
 export function suggestedMaxHP(c) {
-  const cls = byId(CLASSES, c.classId);
+  const cls = classOf(c);
   if (!cls) return 1;
   const lvl = Math.max(1, c.level);
   const con = abilityMod(c, 'con');
@@ -66,7 +87,7 @@ export function suggestedMaxHP(c) {
 }
 
 export function spellInfo(c) {
-  const cls = byId(CLASSES, c.classId);
+  const cls = classOf(c);
   const ab = c.spellAb || cls?.spellAb;
   if (!ab) return null;
   const m = abilityMod(c, ab);
@@ -76,7 +97,7 @@ export function spellInfo(c) {
 
 // Emplacements de sorts : tableau de 9 niveaux.
 export function spellSlots(c) {
-  const cls = byId(CLASSES, c.classId);
+  const cls = classOf(c);
   const lvl = Math.min(20, Math.max(1, c.level));
   const slots = Array(9).fill(0);
   if (cls?.caster === 'full') {
@@ -99,9 +120,8 @@ export function resourceMax(c, max) {
 }
 
 export function labelFor(c) {
-  const cls = byId(CLASSES, c.classId);
-  const sp = byId(SPECIES, c.speciesId);
-  return [sp?.name, cls ? `${cls.name} ${c.level}` : null].filter(Boolean).join(' · ');
+  const cls = classOf(c);
+  return [speciesName(c), cls ? `${cls.name} ${c.level}` : null].filter(Boolean).join(' · ');
 }
 
 export function featName(id) {
@@ -123,9 +143,11 @@ export function buildCharacter(w) {
   const c = {
     name: w.name.trim(),
     classId: cls.id,
+    customClassName: w.customClassName?.trim() || '',
     subclass: '',
     level: w.level,
     speciesId: sp.id,
+    customSpeciesName: w.customSpeciesName?.trim() || '',
     lineage: w.lineage || '',
     backgroundId: bg.id,
     originFeat: bg.feat,
@@ -150,15 +172,15 @@ export function buildCharacter(w) {
     coins: { pc: 0, pa: 0, pe: 0, po: 0, pp: 0 },
     equipment: '',
     features: [
-      `Classe : ${cls.features}`,
-      `Espèce : ${sp.traits}${w.lineage ? ` (${w.lineage})` : ''}`,
+      cls.features && `Classe : ${cls.features}`,
+      sp.traits && `Espèce : ${sp.traits}${w.lineage ? ` (${w.lineage})` : ''}`,
       `Don d'origine : ${FEATS[bg.feat]}`,
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
     proficiencies: [
-      `Armures : ${cls.armor}`,
-      `Armes : ${cls.weapons}`,
+      cls.armor && `Armures : ${cls.armor}`,
+      cls.weapons && `Armes : ${cls.weapons}`,
       `Outils : ${[cls.tools, bg.tool].filter(Boolean).join(', ')}`,
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
     languages: 'Commun, ',
     personality: w.personality || '',
     backstory: w.backstory || '',

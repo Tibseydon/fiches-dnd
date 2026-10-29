@@ -1,4 +1,7 @@
 // Données de règles D&D 5.5 (Manuel des joueurs 2024), en français.
+import { SOURCES, EXTRA_CLASSES, EXTRA_SUBCLASSES, EXTRA_SPECIES, EXTRA_LINEAGES } from './extensions.js';
+
+export { SOURCES };
 
 export const ABILITIES = [
   { id: 'str', short: 'FOR', name: 'Force' },
@@ -277,3 +280,17 @@ export const PACT_SLOTS = [
 ];
 
 export const byId = (list, id) => list.find(x => x.id === id);
+
+// Ajout des contenus des extensions (voir extensions.js).
+CLASSES.forEach(c => (c.source = 'phb'));
+CLASSES.push(...EXTRA_CLASSES);
+CLASSES.forEach(c => {
+  c.subclassSources = Object.fromEntries(c.subclasses.map(n => [n, c.source]));
+  (EXTRA_SUBCLASSES[c.id] ?? []).forEach(([n, src]) => {
+    c.subclasses.push(n);
+    c.subclassSources[n] = src;
+  });
+});
+SPECIES.forEach(s => (s.source = 'phb'));
+SPECIES.push(...EXTRA_SPECIES);
+Object.entries(EXTRA_LINEAGES).forEach(([id, l]) => byId(SPECIES, id).lineages.push(...l));
