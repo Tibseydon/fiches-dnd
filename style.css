@@ -428,3 +428,10 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 .spells-card .row.spread { align-items: center; margin-top: 0; }
 .spells-card h2 { margin: 0; }
 @media (max-width: 560px) { input.search { width: 100%; } }
+
+/* Import d'archives .zip */
+.zip-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 420px; overflow: auto; }
+.zip-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.zip-row.off { opacity: .5; }
+.zip-row .check { flex: 1; min-width: 220px; margin: 0; }
+.zip-row input:not([type=checkbox]) { max-width: 320px; }

@@ -78,7 +78,7 @@ Si ta base Supabase a été créée avant cette mise à jour, exécute **une foi
 
 ## Bibliothèque : importer automatiquement les livres du MJ
 
-Le MJ peut déposer le PDF d'un livre qu'il possède (ou un lien direct vers un PDF ou une page web publique) dans l'onglet **Bibliothèque**. Le site lit le texte dans le navigateur, puis une fonction Supabase demande à **Claude** (Haiku 5.5 par défaut) d'en extraire les classes, sous-classes, espèces, historiques et dons : données de jeu exactes et résumés reformulés en français, jamais le texte du livre recopié. Le MJ vérifie et corrige le résultat avant de l'enregistrer. Les contenus restent dans Supabase, visibles uniquement par les membres de la campagne, et ne sont jamais publiés sur GitHub.
+Le MJ peut déposer le PDF d'un livre qu'il possède, une archive **.zip** de plusieurs PDF (décompressée dans le navigateur, sans limite de taille côté serveur, un livre par fichier), un texte collé, ou un lien direct vers un PDF ou une page web publique) dans l'onglet **Bibliothèque**. Le site lit le texte dans le navigateur, puis une fonction Supabase demande à **Claude** (Haiku 5.5 par défaut) d'en extraire les classes, sous-classes, espèces, historiques et dons : données de jeu exactes et résumés reformulés en français, jamais le texte du livre recopié. Le MJ vérifie et corrige le résultat avant de l'enregistrer. Les contenus restent dans Supabase, visibles uniquement par les membres de la campagne, et ne sont jamais publiés sur GitHub.
 
 **Installation (une fois) :**
 

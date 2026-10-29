@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291354';
-import { CAMPAIGN_NAME } from './config.js?v=202610291354';
+import * as store from './store.js?v=202610291433';
+import { CAMPAIGN_NAME } from './config.js?v=202610291433';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610291354';
-import * as R from './rules.js?v=202610291354';
+} from './data.js?v=202610291433';
+import * as R from './rules.js?v=202610291433';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291354';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291354';
+} from './info.js?v=202610291433';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291433';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -567,11 +567,44 @@ function htmlToText(html) {
   return (doc.body?.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const DOC_EXT = /\.(pdf|txt|md|html?)$/i;
+const isZip = b => b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+const isPdf = b => String.fromCharCode(...b.slice(0, 4)) === '%PDF';
+
+function loadJsZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  return new Promise((resolve, reject) => {
+    const tag = document.createElement('script');
+    tag.src = JSZIP;
+    tag.onload = () => resolve(window.JSZip);
+    tag.onerror = () => reject(new Error("Impossible de charger l'outil de décompression des .zip."));
+    document.head.append(tag);
+  });
+}
+
+const fileTitle = path => path.split('/').pop().replace(DOC_EXT, '').replace(/[_]+/g, ' ').trim();
+const mo = n => `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0).replace('.', ',')} Mo`;
+
+// Texte d'un document (PDF, HTML ou texte) sous forme de pages.
+async function readDocument(bytes, range, progress) {
+  if (isPdf(bytes)) {
+    const res = await readPdf(bytes, range.from, range.to, (n, total) => progress?.(`page ${n} / ${total}`));
+    const chars = res.pages.reduce((n, p) => n + p.text.trim().length, 0);
+    if (chars < res.pages.length * 50) throw new Error('PDF scanné en images (presque pas de texte)');
+    return { pages: res.pages, summary: `${res.pages.length} page(s) sur ${res.total}`, chars };
+  }
+  const raw = new TextDecoder().decode(bytes);
+  const text = /<html|<body|<div|<p[ >]/i.test(raw) ? htmlToText(raw) : raw;
+  return { pages: [{ page: null, text }], summary: `${text.length.toLocaleString('fr-FR')} caractères`, chars: text.length };
+}
+
 // Découpe en parties d'environ CHUNK_CHARS caractères, en gardant les numéros de page.
-function makeChunks(pages) {
+// `book` : titre du livre auquel rattacher ces parties (import d'un .zip, un livre par fichier).
+function makeChunks(pages, book = null) {
   const chunks = [];
-  let cur = { from: null, to: null, text: '' };
-  const push = () => { if (cur.text.trim()) chunks.push(cur); cur = { from: null, to: null, text: '' }; };
+  let cur = { from: null, to: null, text: '', book };
+  const push = () => { if (cur.text.trim()) chunks.push(cur); cur = { from: null, to: null, text: '', book }; };
   pages.forEach(({ page, text }) => {
     for (let i = 0; i < text.length; i += CHUNK_CHARS) {
       const piece = text.slice(i, i + CHUNK_CHARS);
@@ -585,12 +618,13 @@ function makeChunks(pages) {
   return chunks;
 }
 
-const itemKey = it => `${it.kind}|${String(it.original_name || it.name).trim().toLowerCase()}`;
+const itemKey = it => `${it._book ?? ''}|${it.kind}|${String(it.original_name || it.name).trim().toLowerCase()}`;
 
 // Fusionne les éléments d'une partie avec ceux déjà trouvés (une option peut chevaucher deux parties).
-function mergeItems(acc, items) {
-  items.forEach(raw => {
-    if (!raw?.name?.trim() || !KIND_LABEL[raw.kind]) return;
+function mergeItems(acc, items, book = null) {
+  items.forEach(item => {
+    if (!item?.name?.trim() || !KIND_LABEL[item.kind]) return;
+    const raw = book ? { ...item, _book: book } : item;
     const old = acc.find(x => itemKey(x) === itemKey(raw));
     if (!old) { acc.push({ ...raw, include: true }); return; }
     Object.entries(raw).forEach(([k, v]) => {
@@ -618,7 +652,9 @@ function libraryView() {
     return;
   }
   const root = mount('<div class="loading">Chargement…</div>');
-  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cost: 0, cancel: false, log: '', model: 'claude-haiku-5-5', paste: '' };
+  const st = { phase: 'form', title: '', from: '', to: '', url: '', file: null, chunks: [], items: [], done: 0, failed: [], usage: { in: 0, out: 0 }, cost: 0, cancel: false, log: '', model: 'claude-haiku-5-5', paste: '',
+    zipEntries: [], perFile: true, warnings: [] };
+  let zip = null; // archive .zip ouverte
   let saved = [];
 
   const reviewRow = (it, i) => `<div class="card lib-item ${it.include ? '' : 'off'}">
@@ -631,6 +667,7 @@ function libraryView() {
           `<option value="${c.id}" ${it.parent_class === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
           <option value="other" ${it.parent_class === 'other' ? 'selected' : ''}>Autre : ${esc(it.parent_class_name || '?')}</option></select>` : ''}
       </div>
+      ${it._book ? `<p class="small info-src">Livre : ${esc(it._book)}</p>` : ''}
       <textarea data-it="${i}" data-f="summary" rows="2">${esc(it.summary)}</textarea>
       <p class="small muted">${[
         it.kind === 'class' && `DV d${it.hit_die || '?'} · JS ${(it.saving_throws ?? []).map(R.abilityShort).join(', ') || '?'} · ${it.skill_count || '?'} compétences · magie : ${{ none: 'aucune', full: 'complète', half: 'semi', third: 'tiers', pact: 'pacte' }[it.spellcasting] ?? it.spellcasting}`,
@@ -654,7 +691,7 @@ function libraryView() {
         <form id="lib-form">
           <label>Titre du livre (affiché comme source)<input name="title" required value="${esc(st.title)}" placeholder="ex. Tasha's Cauldron of Everything"></label>
           <div class="grid two">
-            <label>Fichier (PDF, ou texte .txt / .md / .html)<input type="file" name="file" accept=".pdf,.txt,.md,.html,.htm,application/pdf,text/*"></label>
+            <label>Fichier (PDF, .zip de PDF, ou texte .txt / .md / .html)<input type="file" name="file" accept=".pdf,.zip,.txt,.md,.html,.htm,application/pdf,application/zip,text/*"></label>
             <label>… ou lien direct vers un PDF ou une page web publique<input name="url" type="url" value="${esc(st.url)}" placeholder="https://…"></label>
           </div>
           <label>… ou colle le texte du document (ouvre-le dans ton navigateur, Ctrl + A puis Ctrl + C, et colle ici)
@@ -671,9 +708,26 @@ function libraryView() {
 
       ${st.phase === 'reading' ? `<section class="card"><h2>Lecture du document…</h2><p class="muted" id="lib-progress">${esc(st.log)}</p></section>` : ''}
 
+      ${st.phase === 'zip' ? `<section class="card">
+        <h2>Contenu de l'archive</h2>
+        <p class="muted small">${st.zipEntries.length} document(s) lisible(s) trouvé(s). Coche ceux à importer.</p>
+        <label class="check"><input type="checkbox" data-zip-perfile ${st.perFile ? 'checked' : ''}> Un livre par fichier (le titre est le nom du fichier, modifiable)</label>
+        <div class="zip-list">${st.zipEntries.map((z, i) => `<div class="zip-row ${z.include ? '' : 'off'}">
+          <label class="check"><input type="checkbox" data-zip-inc="${i}" ${z.include ? 'checked' : ''}> <span class="small">${esc(z.name)}</span> <small class="muted">${mo(z.size)}</small></label>
+          ${st.perFile ? `<input data-zip-title="${i}" value="${esc(z.title)}" aria-label="Titre du livre">` : ''}
+        </div>`).join('')}</div>
+        ${st.perFile ? '' : `<p class="small muted">Tous les fichiers seront rattachés au livre « ${esc(st.title)} ».</p>`}
+        <p class="small muted">La plage de pages ne s'applique pas aux archives : chaque fichier est lu en entier.</p>
+        <div class="row">
+          <button class="btn primary" data-a="zip-read" ${st.zipEntries.some(z => z.include) ? '' : 'disabled'}>Lire les ${st.zipEntries.filter(z => z.include).length} fichier(s) sélectionné(s)</button>
+          <button class="btn ghost" data-a="lib-reset">Annuler</button>
+        </div>
+      </section>` : ''}
+
       ${st.phase === 'ready' ? `<section class="card">
         <h2>${esc(st.title)}</h2>
         <p>${esc(st.log)} → <b>${st.chunks.length}</b> partie${st.chunks.length > 1 ? 's' : ''} à analyser.</p>
+        ${st.warnings.length ? `<p class="error small">Ignoré(s) : ${st.warnings.map(esc).join(' · ')}</p>` : ''}
         <p>Coût estimé avec ${esc(modelInfo(st.model).label)} : <b>${hi < 0.01 ? 'moins de 0,01 $' : `${usd(lo)} à ${usd(hi)}`}</b> (facturé sur ta clé API Anthropic).</p>
         <div class="row">
           <button class="btn primary" data-a="lib-run">Lancer l'extraction</button>
@@ -725,13 +779,14 @@ function libraryView() {
         let attempt = 0;
         for (;;) {
           try {
+            const book = st.chunks[i].book;
             const res = await store.libraryCall({
-              action: 'extract', title: st.title, text: st.chunks[i].text,
-              known: st.items.map(x => ({ kind: x.kind, name: x.original_name || x.name })),
+              action: 'extract', title: book ?? st.title, text: st.chunks[i].text,
+              known: st.items.filter(x => (x._book ?? null) === book).map(x => ({ kind: x.kind, name: x.original_name || x.name })),
             });
             if (res.model) st.model = res.model;
             st.cost += costOf(st.model, res.usage?.input_tokens ?? 0, res.usage?.output_tokens ?? 0);
-            if (res.error) { st.failed.push(i); st.log = `Partie ${i + 1} : ${res.error}`; } else mergeItems(st.items, res.items ?? []);
+            if (res.error) { st.failed.push(i); st.log = `Partie ${i + 1} : ${res.error}`; } else mergeItems(st.items, res.items ?? [], book);
             break;
           } catch (e) {
             if (e.retry && attempt++ < 2) { await new Promise(r => setTimeout(r, 20000)); continue; }
@@ -782,21 +837,28 @@ function libraryView() {
         progress('Téléchargement du lien…');
         bytes = new Uint8Array(await (await store.libraryCall({ action: 'fetch', url: st.url })).arrayBuffer());
       }
-      const isPdf = String.fromCharCode(...bytes.slice(0, 4)) === '%PDF';
-      let pages;
-      if (isPdf) {
-        const res = await readPdf(bytes, Number(st.from) || 0, Number(st.to) || 0, (n, total) => progress(`Lecture de la page ${n} / ${total}…`));
-        pages = res.pages;
-        const chars = pages.reduce((n, p) => n + p.text.trim().length, 0);
-        if (chars < pages.length * 50) throw new Error('Ce PDF ne contient presque pas de texte (PDF scanné en images ?) : il ne peut pas être analysé.');
-        st.log = `${pages.length} page(s) lue(s) sur ${res.total}`;
-      } else {
-        const raw = new TextDecoder().decode(bytes);
-        const text = /<html|<body|<div|<p[ >]/i.test(raw) ? htmlToText(raw) : raw;
-        pages = [{ page: null, text }];
-        st.log = `${Math.round(text.length / 1000)} 000 caractères lus`;
+      if (isZip(bytes)) {
+        progress("Ouverture de l'archive…");
+        const JSZip = await loadJsZip();
+        zip = await JSZip.loadAsync(bytes);
+        st.zipEntries = Object.values(zip.files)
+          .filter(z => !z.dir && DOC_EXT.test(z.name) && !/(^|\/)(__MACOSX|\.)/.test(z.name))
+          .map(z => ({ name: z.name, size: z._data?.uncompressedSize ?? 0, include: true, title: fileTitle(z.name) }));
+        if (!st.zipEntries.length) throw new Error("Cette archive ne contient aucun PDF ni fichier texte lisible.");
+        st.perFile = st.zipEntries.length > 1;
+        st.phase = 'zip';
+        render();
+        return;
       }
-      st.chunks = makeChunks(pages);
+      let doc;
+      try {
+        doc = await readDocument(bytes, { from: Number(st.from) || 0, to: Number(st.to) || 0 }, t => progress(`Lecture : ${t}…`));
+      } catch (ex) {
+        throw new Error(/scanné/.test(ex.message) ? 'Ce PDF ne contient presque pas de texte (PDF scanné en images ?) : il ne peut pas être analysé.' : ex.message);
+      }
+      st.log = `${doc.summary} lu(s)`;
+      st.warnings = [];
+      st.chunks = makeChunks(doc.pages);
       if (!st.chunks.length) throw new Error('Aucun texte trouvé dans ce document.');
       // Modèle configuré dans la fonction Supabase (pour l'estimation du coût).
       st.model = (await store.libraryCall({ action: 'info' }).catch(() => null))?.model ?? st.model;
@@ -813,18 +875,50 @@ function libraryView() {
     if (!a) return;
     const { a: act, k } = a.dataset;
     if (act === 'lib-run') runParts(st.chunks.map((_, i) => i));
+    if (act === 'zip-read') {
+      const chosen = st.zipEntries.filter(z => z.include);
+      st.phase = 'reading';
+      st.warnings = [];
+      render();
+      const progress = t => { const el = root.querySelector('#lib-progress'); if (el) el.textContent = t; };
+      const chunks = [];
+      let pages = 0;
+      for (const [n, z] of chosen.entries()) {
+        try {
+          const bytes = await zip.file(z.name).async('uint8array');
+          const doc = await readDocument(bytes, {}, t => progress(`Fichier ${n + 1} / ${chosen.length} — ${z.name} : ${t}`));
+          pages += doc.pages.filter(p => p.page).length;
+          chunks.push(...makeChunks(doc.pages, st.perFile ? (z.title.trim() || fileTitle(z.name)) : null));
+        } catch (ex) {
+          st.warnings.push(`${z.name} (${ex.message})`);
+        }
+      }
+      if (!chunks.length) {
+        Object.assign(st, { phase: 'zip', log: '' });
+        render();
+        toast("Aucun texte n'a pu être lu dans les fichiers choisis.", 'error');
+        return;
+      }
+      st.model = (await store.libraryCall({ action: 'info' }).catch(() => null))?.model ?? st.model;
+      Object.assign(st, {
+        phase: 'ready', chunks, items: [], done: 0, failed: [], cost: 0,
+        log: `${chosen.length - st.warnings.length} fichier(s) lu(s)${pages ? `, ${pages} page(s)` : ''}`,
+      });
+      render();
+    }
     if (act === 'lib-retry') { const again = st.failed; st.failed = []; st.done -= again.length; runParts(again); }
     if (act === 'lib-stop') { st.cancel = true; st.log = 'Extraction arrêtée.'; }
-    if (act === 'lib-reset') { Object.assign(st, { phase: 'form', chunks: [], items: [], log: '' }); render(); }
+    if (act === 'lib-reset') { zip = null; Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', zipEntries: [], warnings: [] }); render(); }
     if (act === 'lib-save') {
       a.disabled = true;
-      const rows = st.items.filter(x => x.include).map(({ include, kind, name, ...data }) =>
-        ({ kind, name: name.trim(), source_title: st.title, data }));
+      const rows = st.items.filter(x => x.include).map(({ include, kind, name, _book, ...data }) =>
+        ({ kind, name: name.trim(), source_title: _book || st.title, data }));
       try {
         await store.addContent(rows);
         await reloadLibrary();
         saved = await store.listContent();
-        Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', paste: '', from: '', to: '' });
+        zip = null;
+        Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', paste: '', from: '', to: '', zipEntries: [], warnings: [] });
         toast(`${rows.length} élément(s) ajouté(s) à la campagne.`, 'ok');
         render();
       } catch (ex) { toast(ex.message, 'error'); a.disabled = false; }
@@ -844,11 +938,14 @@ function libraryView() {
 
   root.addEventListener('change', e => {
     const t = e.target;
+    if (t.dataset.zipInc) { st.zipEntries[Number(t.dataset.zipInc)].include = t.checked; render(); return; }
+    if (t.hasAttribute('data-zip-perfile')) { st.perFile = t.checked; render(); return; }
     if (t.dataset.inc) { st.items[Number(t.dataset.inc)].include = t.checked; render(); }
     else if (t.dataset.it) { st.items[Number(t.dataset.it)][t.dataset.f] = t.value; if (t.dataset.f === 'kind') render(); }
   });
   root.addEventListener('input', e => {
     const t = e.target;
+    if (t.dataset.zipTitle) { st.zipEntries[Number(t.dataset.zipTitle)].title = t.value; return; }
     if (t.dataset.it && t.tagName !== 'SELECT') st.items[Number(t.dataset.it)][t.dataset.f] = t.value;
   });
 
