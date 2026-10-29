@@ -435,3 +435,7 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 .zip-row.off { opacity: .5; }
 .zip-row .check { flex: 1; min-width: 220px; margin: 0; }
 .zip-row input:not([type=checkbox]) { max-width: 320px; }
+
+/* Bascule mode joueur / MJ */
+.mode-toggle { white-space: nowrap; }
+.mode-toggle.player { border-color: var(--gold); color: var(--gold); }

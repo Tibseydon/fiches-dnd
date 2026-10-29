@@ -1,14 +1,14 @@
-import * as store from './store.js?v=202610291433';
-import { CAMPAIGN_NAME } from './config.js?v=202610291433';
+import * as store from './store.js?v=202610291554';
+import { CAMPAIGN_NAME } from './config.js?v=202610291554';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610291433';
-import * as R from './rules.js?v=202610291433';
+} from './data.js?v=202610291554';
+import * as R from './rules.js?v=202610291554';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291433';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291433';
+} from './info.js?v=202610291554';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291554';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -255,6 +255,21 @@ function hpBar(c) {
   </div>`;
 }
 
+// ── Mode joueur du MJ ───────────────────────────────────────
+// Le MJ peut utiliser le site comme un joueur. Simple préférence d'affichage, mémorisée
+// sur l'appareil : ses droits en base ne changent pas, et un joueur ne voit jamais ce bouton.
+
+const PLAYER_MODE_KEY = 'dnd55.playerMode';
+const playerMode = () => { try { return localStorage.getItem(PLAYER_MODE_KEY) === '1'; } catch { return false; } };
+const isGM = () => me?.role === 'mj' && !playerMode();
+
+function togglePlayerMode() {
+  try { localStorage.setItem(PLAYER_MODE_KEY, playerMode() ? '0' : '1'); } catch { /* préférence non mémorisée */ }
+  toast(isGM() ? 'Mode MJ activé.' : 'Mode joueur activé : tu vois le site comme un joueur.', 'ok');
+  if (!isGM() && /^#\/(campagne|bibliotheque)/.test(location.hash)) location.hash = '#/groupe';
+  else route();
+}
+
 // ── Navigation ──────────────────────────────────────────────
 
 function renderNav() {
@@ -263,10 +278,13 @@ function renderNav() {
   $nav.innerHTML = `
     <a href="#/groupe" class="${h.startsWith('#/groupe') || h === '' ? 'active' : ''}">Le groupe</a>
     <a href="#/nouveau" class="${h.startsWith('#/nouveau') ? 'active' : ''}">+ Nouveau personnage</a>
-    ${me.role === 'mj' ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>
+    ${isGM() ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>
       <a href="#/bibliotheque" class="${h.startsWith('#/bibliotheque') ? 'active' : ''}">Bibliothèque</a>` : ''}
-    <a href="#/profil" class="who ${h.startsWith('#/profil') ? 'active' : ''}" title="Mon profil">${esc(me.displayName)}${me.role === 'mj' ? ' <span class="badge gm">MJ</span>' : ''}</a>
+    <a href="#/profil" class="who ${h.startsWith('#/profil') ? 'active' : ''}" title="Mon profil">${esc(me.displayName)}${isGM() ? ' <span class="badge gm">MJ</span>' : ''}</a>
+    ${me.role === 'mj' ? `<button class="btn ghost small mode-toggle ${isGM() ? '' : 'player'}" id="mode-toggle"
+      title="${isGM() ? 'Voir et utiliser le site comme un joueur' : 'Retrouver les droits et outils du MJ'}">${isGM() ? '🎲 Mode joueur' : '👑 Repasser MJ'}</button>` : ''}
     <button class="btn ghost small" id="logout">Déconnexion</button>`;
+  $nav.querySelector('#mode-toggle')?.addEventListener('click', togglePlayerMode);
   $nav.querySelector('#logout').onclick = () => { location.hash = '#/groupe'; store.signOut(); };
 }
 
@@ -472,7 +490,7 @@ function profileView() {
     <form id="profile">
       <label>Pseudo (affiché au groupe et sur tes fiches)
         <input name="displayName" value="${esc(me.displayName)}" required maxlength="40" autocomplete="nickname"></label>
-      <p class="small muted">E-mail : ${esc(me.email ?? '')} · Rôle : ${me.role === 'mj' ? 'MJ' : 'joueur'}</p>
+      <p class="small muted">E-mail : ${esc(me.email ?? '')} · Rôle : ${me.role === 'mj' ? (isGM() ? 'MJ' : 'MJ (en mode joueur)') : 'joueur'}</p>
       <button class="btn primary">Enregistrer</button>
       <p class="error" id="err"></p>
     </form>
@@ -498,7 +516,7 @@ function profileView() {
 
 function campaignView() {
   const root = mount('<div class="loading">Chargement…</div>');
-  const gm = me.role === 'mj';
+  const gm = isGM();
   store.getCampaign().then(cfg => {
     root.innerHTML = `<section class="card narrow">
       <h1>Campagne</h1>
@@ -647,7 +665,7 @@ function estimateCost(model, chars, parts) {
 const usd = n => `${n < 0.01 ? 'moins de 0,01' : n < 1 ? n.toFixed(2).replace('.', ',') : n.toFixed(1).replace('.', ',')} $`;
 
 function libraryView() {
-  if (me.role !== 'mj') {
+  if (!isGM()) {
     mount('<section class="card narrow"><h1>Bibliothèque</h1><p>Réservée au MJ.</p></section>');
     return;
   }
@@ -1558,7 +1576,7 @@ function sheetView(id) {
         <button class="btn ghost small" data-a="print">Imprimer</button>
         <button class="btn ghost small" data-a="export">Exporter</button>
         ${canEdit ? '<button class="btn ghost small" data-a="longrest" title="PV, emplacements et ressources restaurés">Repos long</button>' : ''}
-        ${c.ownerUid === me.uid || me.role === 'mj' ? '<button class="btn danger small" data-a="delete">Supprimer</button>' : ''}
+        ${c.ownerUid === me.uid || isGM() ? '<button class="btn danger small" data-a="delete">Supprimer</button>' : ''}
       </div>
     </header>`;
   }
@@ -1956,7 +1974,7 @@ function sheetView(id) {
     const first = !c;
     c = data;
     c.id = id;
-    canEdit = c.ownerUid === me.uid || me.role === 'mj';
+    canEdit = c.ownerUid === me.uid || isGM();
     if (!first && document.activeElement?.closest?.('.view') && canEdit) {
       // Modification distante (ex. le MJ) pendant qu'on édite : on rafraîchit quand même.
       toast('Fiche mise à jour par un autre joueur.');
