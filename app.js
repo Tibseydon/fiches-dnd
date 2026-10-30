@@ -1,19 +1,21 @@
-import * as store from './store.js?v=202610291818';
-import { CAMPAIGN_NAME } from './config.js?v=202610291818';
+import * as store from './store.js?v=202610301000';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610291818';
-import * as R from './rules.js?v=202610291818';
+} from './data.js?v=202610301000';
+import * as R from './rules.js?v=202610301000';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610291818';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610291818';
+} from './info.js?v=202610301000';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610301000';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
 let me = null;
 let teardown = [];
+let campaigns = []; // mes campagnes : [{ id, name, joinCode, settings, role }]
+let campaign = null; // campagne ouverte
+let campaignsError = '';
 
 // ── Utilitaires ─────────────────────────────────────────────
 
@@ -261,27 +263,80 @@ function hpBar(c) {
 
 const PLAYER_MODE_KEY = 'dnd55.playerMode';
 const playerMode = () => { try { return localStorage.getItem(PLAYER_MODE_KEY) === '1'; } catch { return false; } };
-const isGM = () => me?.role === 'mj' && !playerMode();
+const isGM = () => campaign?.role === 'mj' && !playerMode();
 
 function togglePlayerMode() {
   try { localStorage.setItem(PLAYER_MODE_KEY, playerMode() ? '0' : '1'); } catch { /* préférence non mémorisée */ }
   toast(isGM() ? 'Mode MJ activé.' : 'Mode joueur activé : tu vois le site comme un joueur.', 'ok');
-  if (!isGM() && /^#\/(campagne|bibliotheque)/.test(location.hash)) location.hash = '#/groupe';
+  if (!isGM() && /^#\/bibliotheque/.test(location.hash)) location.hash = '#/groupe';
   else route();
 }
+
+// ── Campagne ouverte ────────────────────────────────────────
+// Chacun peut créer des campagnes (il en est le MJ) ou en rejoindre avec un code.
+// La dernière campagne ouverte est mémorisée sur l'appareil.
+
+const CAMPAIGN_KEY = 'dnd55.currentCampaign';
+const storedCampaign = () => { try { return localStorage.getItem(CAMPAIGN_KEY); } catch { return null; } };
+
+function showBrand() {
+  const name = campaign?.name ?? 'Fiches D&D';
+  document.getElementById('brand').textContent = name;
+  document.title = campaign ? `${name} — Fiches D&D 5.5` : 'Fiches D&D 5.5';
+}
+
+// Recharge la liste de mes campagnes et garde la campagne ouverte si j'en suis encore membre.
+async function loadCampaigns() {
+  try {
+    campaigns = await store.listCampaigns();
+    campaignsError = '';
+  } catch (e) {
+    campaigns = [];
+    campaignsError = e.message;
+  }
+  const want = campaign?.id ?? storedCampaign();
+  campaign = campaigns.find(c => c.id === want) ?? null;
+  showBrand();
+}
+
+async function openCampaign(c, hash = '#/groupe') {
+  const switched = c.id !== campaign?.id;
+  campaign = c;
+  try { localStorage.setItem(CAMPAIGN_KEY, c.id); } catch { /* non mémorisé */ }
+  showBrand();
+  if (switched) await reloadLibrary();
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+
+function closeCampaign() {
+  campaign = null;
+  try { localStorage.removeItem(CAMPAIGN_KEY); } catch { /* rien */ }
+  showBrand();
+  applyLibrary([]);
+}
+
+// « k7qm2xwd » → « K7QM-2XWD »
+const formatCode = code => {
+  const c = String(code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
+};
+
+const roleLabel = role => (role === 'mj' ? 'MJ' : 'Joueur');
 
 // ── Navigation ──────────────────────────────────────────────
 
 function renderNav() {
   if (!me) { $nav.innerHTML = ''; return; }
   const h = location.hash;
+  const home = !campaign || /^#\/(accueil|rejoindre)/.test(h);
   $nav.innerHTML = `
-    <a href="#/groupe" class="${h.startsWith('#/groupe') || h === '' ? 'active' : ''}">Le groupe</a>
-    <a href="#/nouveau" class="${h.startsWith('#/nouveau') ? 'active' : ''}">+ Nouveau personnage</a>
-    ${isGM() ? `<a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>
-      <a href="#/bibliotheque" class="${h.startsWith('#/bibliotheque') ? 'active' : ''}">Bibliothèque</a>` : ''}
+    <a href="#/accueil" class="${home && !h.startsWith('#/profil') ? 'active' : ''}" title="Changer de campagne, en créer ou en rejoindre une">Mes campagnes</a>
+    ${campaign ? `<a href="#/groupe" class="${!home && (h.startsWith('#/groupe') || h === '') ? 'active' : ''}">Le groupe</a>
+      <a href="#/nouveau" class="${h.startsWith('#/nouveau') ? 'active' : ''}">+ Nouveau personnage</a>
+      <a href="#/campagne" class="${h.startsWith('#/campagne') ? 'active' : ''}">Campagne</a>
+      ${isGM() ? `<a href="#/bibliotheque" class="${h.startsWith('#/bibliotheque') ? 'active' : ''}">Bibliothèque</a>` : ''}` : ''}
     <a href="#/profil" class="who ${h.startsWith('#/profil') ? 'active' : ''}" title="Mon profil">${esc(me.displayName)}${isGM() ? ' <span class="badge gm">MJ</span>' : ''}</a>
-    ${me.role === 'mj' ? `<button class="btn ghost small mode-toggle ${isGM() ? '' : 'player'}" id="mode-toggle"
+    ${campaign?.role === 'mj' ? `<button class="btn ghost small mode-toggle ${isGM() ? '' : 'player'}" id="mode-toggle"
       title="${isGM() ? 'Voir et utiliser le site comme un joueur' : 'Retrouver les droits et outils du MJ'}">${isGM() ? '🎲 Mode joueur' : '👑 Repasser MJ'}</button>` : ''}
     <button class="btn ghost small" id="logout">Déconnexion</button>`;
   $nav.querySelector('#mode-toggle')?.addEventListener('click', togglePlayerMode);
@@ -295,10 +350,13 @@ function route() {
   if (!me) return authView();
   if (me.noProfile) return noProfileView();
   const h = location.hash || '#/groupe';
+  if (h.startsWith('#/profil')) return profileView();
   const m = h.match(/^#\/perso\/([\w-]+)/);
   if (m) return sheetView(m[1]);
+  const inv = h.match(/^#\/rejoindre\/([\w-]+)/);
+  if (inv) return homeView(formatCode(decodeURIComponent(inv[1])));
+  if (!campaign || h.startsWith('#/accueil')) return homeView();
   if (h.startsWith('#/nouveau')) return wizardView();
-  if (h.startsWith('#/profil')) return profileView();
   if (h.startsWith('#/campagne')) return campaignView();
   if (h.startsWith('#/bibliotheque')) return libraryView();
   partyView();
@@ -312,9 +370,10 @@ function authView() {
     <section class="auth">
       <div class="auth-hero">
         <div class="d20">20</div>
-        <h1>${esc(CAMPAIGN_NAME)}</h1>
-        <p>Fiches de personnage D&amp;D 5.5 — crée ton héros et suis toute la troupe.</p>
+        <h1>Fiches D&amp;D 5.5</h1>
+        <p>Crée ta campagne ou rejoins celle de ton MJ, puis crée ton héros et suis toute la troupe.</p>
       </div>
+      ${/^#\/rejoindre\//.test(location.hash) ? `<div class="notice">Tu as reçu une invitation à rejoindre une campagne : connecte-toi ou crée ton compte, puis valide l'invitation.</div>` : ''}
       ${local ? `<div class="notice">Mode local : les données restent dans ce navigateur. Configure Supabase (voir README) pour partager les fiches avec le groupe.</div>` : ''}
       <div class="card auth-card">
         <div class="tabs">
@@ -331,7 +390,6 @@ function authView() {
           <label>Pseudo (nom du joueur)<input name="displayName" required maxlength="40" autocomplete="nickname"></label>
           <label>E-mail<input name="email" type="email" required autocomplete="email"></label>
           <label>Mot de passe<input name="password" type="password" required minlength="6" autocomplete="new-password"></label>
-          ${local ? '' : '<label>Code de campagne <small>(donné par le MJ)</small><input name="code" required autocomplete="off"></label>'}
           <button class="btn primary block">Créer mon compte</button>
         </form>
         <p class="error" id="err"></p>
@@ -362,7 +420,7 @@ function authView() {
   root.querySelector('#signup').onsubmit = e => {
     e.preventDefault();
     busy(e.target, async f => {
-      const r = await store.signUp(f.get('email'), f.get('password'), f.get('displayName').trim(), (f.get('code') || '').trim());
+      const r = await store.signUp(f.get('email'), f.get('password'), f.get('displayName').trim());
       if (r?.needsConfirm) {
         root.querySelector('[data-tab=login]').click();
         info.textContent = 'Compte créé ! Clique sur le lien reçu par e-mail, puis connecte-toi.';
@@ -380,9 +438,82 @@ function authView() {
 function noProfileView() {
   mount(`<section class="card narrow">
     <h2>Profil introuvable</h2>
-    <p>Ton compte existe mais n'est pas rattaché à la campagne (code de campagne refusé ?). Contacte le MJ ou recrée un compte.</p>
+    <p>Ton compte existe mais son profil est introuvable. Déconnecte-toi puis reconnecte-toi ; si le problème persiste, recrée un compte.</p>
     <button class="btn primary" id="out">Se déconnecter</button>
   </section>`).querySelector('#out').onclick = () => store.signOut();
+}
+
+// ── Accueil : mes campagnes, créer ou rejoindre ─────────────
+
+function homeView(inviteCode = '') {
+  const root = mount('<div class="loading">Chargement des campagnes…</div>');
+
+  const render = () => {
+    root.innerHTML = `
+      <div class="page-head"><div>
+        <h1>Mes campagnes</h1>
+        <p class="muted">Bonjour ${esc(me.displayName)} ! Ouvre une campagne, crée la tienne (tu en seras le MJ) ou rejoins celle d'un ami avec son code.</p>
+      </div></div>
+      ${campaignsError ? `<p class="error">${esc(campaignsError)}</p>` : ''}
+      ${inviteCode ? '<div class="notice wide">Invitation reçue : vérifie le code ci-dessous puis clique sur « Rejoindre ».</div>' : ''}
+      ${campaigns.length ? `<div class="grid camps">${campaigns.map(c => `
+        <button class="card camp-card${c.id === campaign?.id ? ' current' : ''}" data-open="${esc(c.id)}">
+          <span class="d20 small">20</span>
+          <span class="camp-title"><b>${esc(c.name)}</b>
+            <span class="muted small">Niveau de départ ${esc(c.settings.startLevel)}${c.id === campaign?.id ? ' · campagne ouverte' : ''}</span></span>
+          <span class="badge ${c.role === 'mj' ? 'gm' : ''}">${roleLabel(c.role)}</span>
+        </button>`).join('')}</div>`
+        : campaignsError ? '' : `<div class="empty card"><div class="d20 small">20</div>
+          <p>Tu ne fais encore partie d'aucune campagne. Crée la tienne ou rejoins celle de ton MJ ci-dessous.</p></div>`}
+      <div class="grid two">
+        <form class="card" id="join">
+          <h2>Rejoindre une campagne</h2>
+          <p class="small muted">Demande le code d'invitation à ton MJ (il le trouve dans l'onglet « Campagne »).</p>
+          <label>Code d'invitation<input name="code" value="${esc(inviteCode)}" placeholder="ex. K7QM-2XWD" required maxlength="20" autocomplete="off" class="code-input"></label>
+          <button class="btn primary">Rejoindre</button>
+        </form>
+        <form class="card" id="create">
+          <h2>Créer une campagne</h2>
+          <p class="small muted">Tu en deviens automatiquement le MJ : tu choisis le niveau de départ, gères la bibliothèque
+            et peux modifier toutes les fiches. Un code d'invitation est créé pour tes joueurs.</p>
+          <label>Nom de la campagne<input name="name" placeholder="ex. La Malédiction de Strahd" required maxlength="60"></label>
+          <button class="btn primary">Créer et devenir MJ</button>
+        </form>
+      </div>`;
+  };
+
+  root.addEventListener('click', e => {
+    const b = e.target.closest('[data-open]');
+    const c = b && campaigns.find(x => x.id === b.dataset.open);
+    if (c) openCampaign(c);
+  });
+
+  root.addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button');
+    const f = new FormData(form);
+    btn.disabled = true;
+    try {
+      let c;
+      if (form.id === 'create') {
+        const name = String(f.get('name')).trim();
+        if (!name) throw new Error('Donne un nom à ta campagne.');
+        c = await store.createCampaign(name);
+        toast(`Campagne « ${c.name} » créée : tu en es le MJ.`, 'ok');
+      } else {
+        c = await store.joinCampaign(String(f.get('code')).trim());
+        toast(`Bienvenue dans « ${c.name} » !`, 'ok');
+      }
+      await loadCampaigns();
+      await openCampaign(campaigns.find(x => x.id === c.id) ?? c, form.id === 'create' ? '#/campagne' : '#/groupe');
+    } catch (ex) {
+      toast(ex.message, 'error');
+      btn.disabled = false;
+    }
+  });
+
+  loadCampaigns().then(() => { renderNav(); render(); });
 }
 
 // ── Vue du groupe ───────────────────────────────────────────
@@ -398,7 +529,7 @@ function partyView() {
       <div class="page-head">
         <div>
           <h1>Le groupe</h1>
-          <p class="muted">${list.length} personnage${list.length > 1 ? 's' : ''} · mise à jour en direct</p>
+          <p class="muted">${esc(campaign.name)} · ${list.length} personnage${list.length > 1 ? 's' : ''} · mise à jour en direct</p>
         </div>
         <div class="row">
           <div class="seg">
@@ -423,7 +554,7 @@ function partyView() {
   };
 
   let latest = [];
-  teardown.push(store.watchCharacters((list, e) => { latest = list; render(latest, e); }));
+  teardown.push(store.watchCharacters(campaign.id, (list, e) => { latest = list; render(latest, e); }));
 }
 
 // Suppression : le joueur qui a créé le personnage, ou le MJ (règle aussi appliquée par la base).
@@ -513,7 +644,7 @@ function profileView() {
     <form id="profile">
       <label>Pseudo (affiché au groupe et sur tes fiches)
         <input name="displayName" value="${esc(me.displayName)}" required maxlength="40" autocomplete="nickname"></label>
-      <p class="small muted">E-mail : ${esc(me.email ?? '')} · Rôle : ${me.role === 'mj' ? (isGM() ? 'MJ' : 'MJ (en mode joueur)') : 'joueur'}</p>
+      <p class="small muted">E-mail : ${esc(me.email ?? '')}${campaign ? ` · Rôle dans « ${esc(campaign.name)} » : ${campaign.role === 'mj' ? (isGM() ? 'MJ' : 'MJ (en mode joueur)') : 'joueur'}` : ''}</p>
       <button class="btn primary">Enregistrer</button>
       <p class="error" id="err"></p>
     </form>
@@ -535,37 +666,156 @@ function profileView() {
   };
 }
 
-// ── Réglages de la campagne (MJ) ────────────────────────────
+// ── Campagne : réglages, invitation, membres ────────────────
+
+const inviteLink = code => `${location.href.split('#')[0]}#/rejoindre/${code}`;
+
+async function copyText(text, what) {
+  try { await navigator.clipboard.writeText(text); toast(`${what} copié.`, 'ok'); }
+  catch { prompt(`Copie ${what.toLowerCase()} :`, text); }
+}
 
 function campaignView() {
   const root = mount('<div class="loading">Chargement…</div>');
   const gm = isGM();
-  store.getCampaign().then(cfg => {
-    root.innerHTML = `<section class="card narrow">
-      <h1>Campagne</h1>
-      <form id="campaign">
-        <label>Niveau de départ des personnages
-          <select name="startLevel" ${gm ? '' : 'disabled'}>${Array.from({ length: 20 }, (_, i) =>
-            `<option value="${i + 1}" ${cfg.startLevel === i + 1 ? 'selected' : ''}>Niveau ${i + 1}</option>`).join('')}</select></label>
-        <p class="small muted">Les nouveaux personnages sont créés directement à ce niveau : PV, bonus de maîtrise, emplacements de sorts,
-          ressources et capacités de classe sont calculés automatiquement. Le joueur choisit lui-même sa sous-classe
-          (dès le niveau ${SUBCLASS_LEVEL}), ses améliorations de caractéristiques ou dons, puis ses sorts et autres options sur sa fiche.
-          Les personnages déjà créés ne changent pas.</p>
-        ${gm ? '<button class="btn primary">Enregistrer</button>' : '<p class="notice wide">Seul le MJ peut modifier ces réglages.</p>'}
-        <p class="error" id="err"></p>
-      </form>
-    </section>`;
-    const form = root.querySelector('#campaign');
-    form.onsubmit = async e => {
-      e.preventDefault();
-      const err = root.querySelector('#err');
-      err.textContent = '';
-      try {
-        await store.saveCampaign({ ...cfg, startLevel: Number(new FormData(form).get('startLevel')) });
-        toast('Réglages de campagne enregistrés.', 'ok');
-      } catch (ex) { err.textContent = ex.message; }
-    };
+  let members = [];
+  let error = '';
+
+  const render = () => {
+    const cfg = campaign.settings;
+    const gms = members.filter(m => m.role === 'mj').length;
+    const lastGM = campaign.role === 'mj' && gms <= 1;
+    root.innerHTML = `
+      <div class="page-head"><div>
+        <h1>${esc(campaign.name)}</h1>
+        <p class="muted">Tu es ${campaign.role === 'mj' ? 'MJ' : 'joueur'} dans cette campagne${campaign.role === 'mj' && !gm ? ' (en mode joueur)' : ''}.</p>
+      </div></div>
+      ${error ? `<p class="error">${esc(error)}</p>` : ''}
+      <div class="grid two">
+        <section class="card">
+          <h2>Inviter des joueurs</h2>
+          <p class="small muted">Donne ce code à tes joueurs : sur la page « Mes campagnes », ils choisissent « Rejoindre une campagne » et le saisissent.
+            Tu peux aussi leur envoyer directement le lien d'invitation.</p>
+          <div class="join-code" id="join-code">${esc(campaign.joinCode)}</div>
+          <div class="row wrap">
+            <button class="btn small" data-a="copy-code">Copier le code</button>
+            <button class="btn small" data-a="copy-link">Copier le lien d'invitation</button>
+            ${gm ? `<button class="btn ghost small" data-a="regen" title="L'ancien code ne fonctionnera plus">Nouveau code</button>` : ''}
+          </div>
+        </section>
+        <section class="card">
+          <h2>Réglages</h2>
+          <form id="campaign">
+            ${gm ? `<label>Nom de la campagne<input name="name" value="${esc(campaign.name)}" maxlength="60" required></label>` : ''}
+            <label>Niveau de départ des personnages
+              <select name="startLevel" ${gm ? '' : 'disabled'}>${Array.from({ length: 20 }, (_, i) =>
+                `<option value="${i + 1}" ${cfg.startLevel === i + 1 ? 'selected' : ''}>Niveau ${i + 1}</option>`).join('')}</select></label>
+            <p class="small muted">Les nouveaux personnages sont créés directement à ce niveau : PV, bonus de maîtrise, emplacements de sorts,
+              ressources et capacités de classe sont calculés automatiquement. Le joueur choisit lui-même sa sous-classe
+              (dès le niveau ${SUBCLASS_LEVEL}), ses améliorations de caractéristiques ou dons, puis ses sorts et autres options sur sa fiche.
+              Les personnages déjà créés ne changent pas.</p>
+            ${gm ? '<button class="btn primary">Enregistrer</button>' : '<p class="notice wide">Seul le MJ peut modifier ces réglages.</p>'}
+          </form>
+        </section>
+      </div>
+      <section class="card">
+        <h2>Membres (${members.length})</h2>
+        <ul class="members">${members.map(m => `<li>
+          <span class="m-name">${esc(m.displayName)}${m.uid === me.uid ? ' <span class="badge">moi</span>' : ''}</span>
+          ${gm && m.uid !== me.uid
+            ? `<select data-role="${esc(m.uid)}" aria-label="Rôle de ${esc(m.displayName)}">
+                <option value="joueur" ${m.role === 'joueur' ? 'selected' : ''}>Joueur</option>
+                <option value="mj" ${m.role === 'mj' ? 'selected' : ''}>MJ</option></select>
+              <button class="btn ghost small danger" data-remove="${esc(m.uid)}">Retirer</button>`
+            : `<span class="badge ${m.role === 'mj' ? 'gm' : ''}">${roleLabel(m.role)}</span>`}
+        </li>`).join('')}</ul>
+        ${gm ? '<p class="small muted">Un MJ peut modifier toutes les fiches de la campagne et gérer sa bibliothèque. Une campagne peut avoir plusieurs MJ.</p>' : ''}
+      </section>
+      <section class="card danger-zone">
+        <h2>Quitter ou supprimer</h2>
+        <div class="row wrap">
+          <button class="btn ghost danger" data-a="leave" ${lastGM ? 'disabled' : ''}>Quitter la campagne</button>
+          ${gm ? '<button class="btn danger" data-a="delete">Supprimer la campagne</button>' : ''}
+        </div>
+        ${lastGM ? '<p class="small muted">Tu es le seul MJ : nomme un autre MJ avant de quitter la campagne, ou supprime-la.</p>' : ''}
+        ${gm ? '<p class="small muted">Supprimer la campagne efface pour tout le monde ses fiches de personnage et sa bibliothèque.</p>' : ''}
+      </section>`;
+  };
+
+  const refresh = async () => {
+    try { members = await store.listMembers(campaign.id); error = ''; } catch (e) { error = e.message; }
+    render();
+  };
+
+  const leave = async () => {
+    closeCampaign();
+    await loadCampaigns();
+    location.hash = '#/accueil';
+  };
+
+  root.addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const name = String(f.get('name') ?? '').trim();
+    if (!name) { toast('Le nom ne peut pas être vide.', 'error'); return; }
+    const settings = { ...campaign.settings, startLevel: Number(f.get('startLevel')) };
+    try {
+      await store.updateCampaign(campaign.id, { name, settings });
+      Object.assign(campaign, { name, settings });
+      showBrand();
+      toast('Réglages de campagne enregistrés.', 'ok');
+      render();
+    } catch (ex) { toast(ex.message, 'error'); }
   });
+
+  root.addEventListener('change', async e => {
+    const uid = e.target.dataset.role;
+    if (!uid) return;
+    try {
+      await store.setMemberRole(campaign.id, uid, e.target.value);
+      toast('Rôle mis à jour.', 'ok');
+    } catch (ex) { toast(ex.message, 'error'); }
+    refresh();
+  });
+
+  root.addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const a = b.dataset.a;
+    try {
+      if (a === 'copy-code') await copyText(campaign.joinCode, 'Code');
+      if (a === 'copy-link') await copyText(inviteLink(campaign.joinCode), 'Lien');
+      if (a === 'regen') {
+        if (!confirm("Créer un nouveau code d'invitation ? L'ancien code et l'ancien lien ne fonctionneront plus (les membres actuels restent dans la campagne).")) return;
+        campaign.joinCode = await store.regenerateCode(campaign.id);
+        toast("Nouveau code d'invitation créé.", 'ok');
+        render();
+      }
+      if (b.dataset.remove) {
+        const m = members.find(x => x.uid === b.dataset.remove);
+        if (!confirm(`Retirer ${m?.displayName ?? 'ce joueur'} de la campagne ? Ses fiches restent visibles par le groupe.`)) return;
+        await store.removeMember(campaign.id, b.dataset.remove);
+        toast('Membre retiré.', 'ok');
+        refresh();
+      }
+      if (a === 'leave') {
+        if (!confirm(`Quitter « ${campaign.name} » ? Tu pourras la rejoindre à nouveau avec son code.`)) return;
+        await store.removeMember(campaign.id, me.uid);
+        toast(`Tu as quitté « ${campaign.name} ».`);
+        await leave();
+      }
+      if (a === 'delete') {
+        const typed = prompt(`Supprimer définitivement « ${campaign.name} », ses fiches et sa bibliothèque ?\n\nPour confirmer, tape le nom de la campagne :`);
+        if (typed === null) return;
+        if (typed.trim() !== campaign.name) { toast('Nom incorrect : campagne non supprimée.', 'error'); return; }
+        await store.deleteCampaign(campaign.id);
+        toast('Campagne supprimée.');
+        await leave();
+      }
+    } catch (ex) { toast(ex.message, 'error'); }
+  });
+
+  refresh();
 }
 
 // ── Bibliothèque du MJ (import de livres) ───────────────────
@@ -583,7 +833,7 @@ const costOf = (model, tin, tout) => (tin * modelInfo(model).price[0] + tout * m
 const KIND_LABEL = { class: 'Classe', subclass: 'Sous-classe', species: 'Espèce', background: 'Historique', feat: 'Don' };
 
 async function reloadLibrary() {
-  applyLibrary(await store.listContent().catch(() => []));
+  applyLibrary(campaign ? await store.listContent(campaign.id).catch(() => []) : []);
 }
 
 async function readPdf(bytes, from, to, onPage) {
@@ -955,9 +1205,9 @@ function libraryView() {
       const rows = st.items.filter(x => x.include).map(({ include, kind, name, _book, ...data }) =>
         ({ kind, name: name.trim(), source_title: _book || st.title, data }));
       try {
-        await store.addContent(rows);
+        await store.addContent(campaign.id, rows);
         await reloadLibrary();
-        saved = await store.listContent();
+        saved = await store.listContent(campaign.id);
         zip = null;
         Object.assign(st, { phase: 'form', chunks: [], items: [], log: '', url: '', paste: '', from: '', to: '', zipEntries: [], warnings: [] });
         toast(`${rows.length} élément(s) ajouté(s) à la campagne.`, 'ok');
@@ -971,7 +1221,7 @@ function libraryView() {
       try {
         await store.deleteContent(ids);
         await reloadLibrary();
-        saved = await store.listContent();
+        saved = await store.listContent(campaign.id);
         render();
       } catch (ex) { toast(ex.message, 'error'); }
     }
@@ -990,7 +1240,7 @@ function libraryView() {
     if (t.dataset.it && t.tagName !== 'SELECT') st.items[Number(t.dataset.it)][t.dataset.f] = t.value;
   });
 
-  store.listContent().then(list => { saved = list; render(); });
+  store.listContent(campaign.id).then(list => { saved = list; render(); });
 }
 
 // ── Assistant de création ──────────────────────────────────
@@ -1403,7 +1653,7 @@ function wizardView() {
         const c = R.buildCharacter({ ...w, level: Math.min(20, Math.max(1, Number(w.level) || 1)), bgBonus: bgBonus(), extraSkills: extraSkills() });
         c.ownerUid = me.uid;
         c.ownerName = me.displayName;
-        const id = await store.createCharacter(c);
+        const id = await store.createCharacter(campaign.id, c);
         toast('Personnage créé !', 'ok');
         location.hash = `#/perso/${id}`;
       } catch (err) {
@@ -1474,9 +1724,10 @@ function wizardView() {
   });
 
   render();
-  // Niveau de départ fixé par le MJ.
-  store.getCampaign().then(cfg => {
-    w.level = Math.min(20, Math.max(1, Number(cfg.startLevel) || 1));
+  // Niveau de départ fixé par le MJ (relu au cas où il vient de le changer).
+  loadCampaigns().then(() => {
+    if (!campaign) { location.hash = '#/accueil'; return; }
+    w.level = Math.min(20, Math.max(1, Number(campaign.settings.startLevel) || 1));
     syncChoices();
     render();
   });
@@ -1994,6 +2245,16 @@ function sheetView(id) {
     // Ne pas écraser une saisie en cours avec l'écho de notre propre sauvegarde.
     if (c && (saveTimer || saving)) return;
     if (c && strip(c) === strip(data)) return;
+    // Fiche d'une autre de mes campagnes (lien partagé) : on ouvre cette campagne.
+    if (data.campaignId && data.campaignId !== campaign?.id) {
+      const other = campaigns.find(x => x.id === data.campaignId);
+      if (!other) {
+        root.innerHTML = '<section class="card narrow"><h2>Personnage introuvable</h2><p>Cette fiche appartient à une campagne dont tu ne fais pas partie.</p><a class="btn primary" href="#/accueil">Mes campagnes</a></section>';
+        return;
+      }
+      openCampaign(other, location.hash);
+      return;
+    }
     const first = !c;
     c = data;
     c.id = id;
@@ -2008,16 +2269,19 @@ function sheetView(id) {
 
 // ── Démarrage ───────────────────────────────────────────────
 
-document.getElementById('brand').textContent = CAMPAIGN_NAME;
-document.title = `${CAMPAIGN_NAME} — Fiches D&D 5.5`;
+showBrand();
 
-window.addEventListener('hashchange', () => { if (me) route(); else renderNav(); });
+window.addEventListener('hashchange', () => { if (me || /^#\/rejoindre\//.test(location.hash)) route(); else renderNav(); });
 
 store.init().then(() => {
   store.onAuth(async u => {
     const changed = (u?.uid ?? null) !== (me?.uid ?? null) || !!u?.noProfile !== !!me?.noProfile;
     me = u;
-    if (u && !u.noProfile && changed) await reloadLibrary();
+    if (u && !u.noProfile && changed) {
+      await loadCampaigns();
+      await reloadLibrary();
+    }
+    if (!u) { campaign = null; campaigns = []; showBrand(); applyLibrary([]); }
     if (changed || !u) route();
   });
 }).catch(e => {

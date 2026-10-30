@@ -14,5 +14,5 @@
 export const SUPABASE_URL = 'https://rvsfnwzctddhrwmzceih.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_caE5umB9dF6YuHpE4PdUGg_CN5YSMJm';
 
-// Nom affiché en haut du site.
+// Ancien réglage, plus utilisé : le nom affiché est celui de la campagne ouverte.
 export const CAMPAIGN_NAME = 'Notre campagne';
