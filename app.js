@@ -1,13 +1,13 @@
-import * as store from './store.js?v=202610301000';
+import * as store from './store.js?v=202611011444';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202610301000';
-import * as R from './rules.js?v=202610301000';
+} from './data.js?v=202611011444';
+import * as R from './rules.js?v=202611011444';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202610301000';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202610301000';
+} from './info.js?v=202611011444';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011444';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -321,6 +321,22 @@ const formatCode = code => {
   return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
 };
 
+// Code d'invitation de la partie, copiable en un clic (accueil, groupe).
+const codeChip = code => code ? `<div class="code-chip">
+  <span class="small muted">Code de la partie</span>
+  <code>${esc(code)}</code>
+  <button class="btn small" data-copy-code="${esc(code)}">Copier le code</button>
+  <button class="btn ghost small" data-copy-link="${esc(code)}">Copier le lien</button>
+</div>` : '';
+
+function copyCodeClick(e) {
+  const b = e.target.closest('[data-copy-code], [data-copy-link]');
+  if (!b) return false;
+  if (b.dataset.copyCode) copyText(b.dataset.copyCode, 'Code');
+  else copyText(inviteLink(b.dataset.copyLink), 'Lien');
+  return true;
+}
+
 const roleLabel = role => (role === 'mj' ? 'MJ' : 'Joueur');
 
 // ── Navigation ──────────────────────────────────────────────
@@ -457,12 +473,15 @@ function homeView(inviteCode = '') {
       ${campaignsError ? `<p class="error">${esc(campaignsError)}</p>` : ''}
       ${inviteCode ? '<div class="notice wide">Invitation reçue : vérifie le code ci-dessous puis clique sur « Rejoindre ».</div>' : ''}
       ${campaigns.length ? `<div class="grid camps">${campaigns.map(c => `
-        <button class="card camp-card${c.id === campaign?.id ? ' current' : ''}" data-open="${esc(c.id)}">
-          <span class="d20 small">20</span>
-          <span class="camp-title"><b>${esc(c.name)}</b>
-            <span class="muted small">Niveau de départ ${esc(c.settings.startLevel)}${c.id === campaign?.id ? ' · campagne ouverte' : ''}</span></span>
-          <span class="badge ${c.role === 'mj' ? 'gm' : ''}">${roleLabel(c.role)}</span>
-        </button>`).join('')}</div>`
+        <div class="card camp-card${c.id === campaign?.id ? ' current' : ''}">
+          <button class="camp-open" data-open="${esc(c.id)}" title="Ouvrir cette campagne">
+            <span class="d20 small">20</span>
+            <span class="camp-title"><b>${esc(c.name)}</b>
+              <span class="muted small">Niveau de départ ${esc(c.settings.startLevel)}${c.id === campaign?.id ? ' · campagne ouverte' : ''}</span></span>
+            <span class="badge ${c.role === 'mj' ? 'gm' : ''}">${roleLabel(c.role)}</span>
+          </button>
+          ${codeChip(c.joinCode)}
+        </div>`).join('')}</div>`
         : campaignsError ? '' : `<div class="empty card"><div class="d20 small">20</div>
           <p>Tu ne fais encore partie d'aucune campagne. Crée la tienne ou rejoins celle de ton MJ ci-dessous.</p></div>`}
       <div class="grid two">
@@ -483,6 +502,7 @@ function homeView(inviteCode = '') {
   };
 
   root.addEventListener('click', e => {
+    if (copyCodeClick(e)) return;
     const b = e.target.closest('[data-open]');
     const c = b && campaigns.find(x => x.id === b.dataset.open);
     if (c) openCampaign(c);
@@ -539,6 +559,7 @@ function partyView() {
           <a class="btn primary" href="#/nouveau">+ Nouveau personnage</a>
         </div>
       </div>
+      ${codeChip(campaign.joinCode)}
       ${shown.length ? `<div class="grid cards">${shown.map(partyCard).join('')}</div>` : `
         <div class="empty card">
           <div class="d20 small">20</div>
@@ -552,6 +573,8 @@ function partyView() {
       if (c && canDelete(c)) { b.disabled = true; await deleteWithConfirm(c); b.disabled = false; }
     });
   };
+
+  root.addEventListener('click', copyCodeClick);
 
   let latest = [];
   teardown.push(store.watchCharacters(campaign.id, (list, e) => { latest = list; render(latest, e); }));

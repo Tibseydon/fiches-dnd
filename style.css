@@ -451,12 +451,13 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 
 /* Accueil : mes campagnes */
 .grid.camps { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-bottom: 18px; }
-.camp-card {
-  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer;
-  font: inherit; color: inherit; border: 1px solid var(--line);
-}
+.camp-card { display: flex; flex-direction: column; gap: 10px; }
 .camp-card:hover { border-color: var(--accent); }
 .camp-card.current { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.camp-open {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: inherit; background: none; border: 0; padding: 0;
+}
 .camp-card .d20 { flex: none; }
 .camp-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .camp-title b { font-family: 'Cinzel', Georgia, serif; font-size: 1.1rem; overflow-wrap: anywhere; }
@@ -477,3 +478,11 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 .grid.two + .card { margin-top: 14px; }
 .camp-card + .camp-card { margin-top: 0; }
 .code-input::placeholder { text-transform: none; letter-spacing: normal; font-family: inherit; }
+
+/* Code de la partie */
+.code-chip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px dashed var(--line); border-radius: 10px; background: var(--bg);
+}
+.code-chip code { font-family: ui-monospace, monospace; font-size: 1.05rem; font-weight: 700; letter-spacing: .12em; user-select: all; }
+.page-head + .code-chip { margin-bottom: 16px; width: fit-content; max-width: 100%; }
