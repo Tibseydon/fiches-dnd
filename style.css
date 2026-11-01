@@ -521,3 +521,5 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 }
 .sp-fields label.span2 { grid-column: span 2; }
 @media (max-width: 600px) { .sp-fields label.span2 { grid-column: 1 / -1; } }
+.spell-group { margin-bottom: 6px; }
+.add-spell { margin: 2px 0 4px; }

@@ -1,13 +1,13 @@
-import * as store from './store.js?v=202611011609';
+import * as store from './store.js?v=202611011726';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202611011609';
-import * as R from './rules.js?v=202611011609';
+} from './data.js?v=202611011726';
+import * as R from './rules.js?v=202611011726';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202611011609';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011609';
+} from './info.js?v=202611011726';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011726';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -75,6 +75,7 @@ const norm = t => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u030
 function applySearch(container, query) {
   if (!container) return;
   const words = norm(query).split(/\s+/).filter(Boolean);
+  container.querySelectorAll('.empty-group').forEach(g => (g.hidden = words.length > 0));
   container.querySelectorAll('[data-search]').forEach(el => {
     const hide = words.length > 0 && !words.every(wd => el.dataset.search.includes(wd));
     el.hidden = hide;
@@ -2079,7 +2080,14 @@ function sheetView(id) {
     const used = c.slotsUsed ?? Array(9).fill(0);
     const cls = R.classOf(c);
     const spells = (c.spells ?? []).map((s, i) => ({ ...s, i }));
-    const levels = [...new Set(spells.map(s => Number(s.level) || 0))].sort((a, b) => a - b);
+    // Niveaux affichés : ceux des sorts déjà notés, plus les sorts mineurs et chaque niveau
+    // d'emplacement du personnage (pour pouvoir y ajouter un sort directement).
+    const caster = !!R.spellInfo(c) || slots.some(Boolean);
+    const levels = [...new Set([
+      ...spells.map(s => Number(s.level) || 0),
+      ...(caster ? [0] : []),
+      ...slots.map((n, l) => (n ? l + 1 : null)).filter(l => l !== null),
+    ])].sort((a, b) => a - b);
     return `<div class="top-stats">
         <div class="stat card"><span class="lbl">Caractéristique</span>
           ${sel('spellAb', ABILITIES.map(a => [a.id, a.name]), { rerender: true, emptyLabel: 'Selon la classe' })}
@@ -2102,14 +2110,18 @@ function sheetView(id) {
       <section class="card spells-card">
         <div class="row spread"><h2>Sorts</h2>${spells.length > 1 ? searchBox(spellQuery, 'Rechercher un sort…') : ''}</div>
         <p class="muted small" data-search-empty hidden>Aucun sort ne correspond à ta recherche.</p>
-        ${spells.length ? levels.map(l => {
+        ${levels.map(l => {
           const list = spells.filter(s => (Number(s.level) || 0) === l);
-          return `<div data-search-group>
+          return `<div class="spell-group${list.length ? '' : ' empty-group'}" ${list.length ? 'data-search-group' : ''}>
           <h3 class="spell-level">${l === 0 ? 'Sorts mineurs' : `Niveau ${l}`}
             ${l > 0 && slots[l - 1] ? `<small class="muted">· ${slots[l - 1] - Math.min(slots[l - 1], used[l - 1] || 0)}/${slots[l - 1]} emplacements</small>` : ''}</h3>
-          ${list.map(spellCard).join('')}</div>`;
-        }).join('') : `<p class="muted small">Aucun sort pour l'instant.${canEdit ? ' Ajoute tes sorts connus ou préparés : temps d\'incantation, portée, durée, jet et effet s\'affichent ensuite en un coup d\'œil.' : ''}</p>`}
-        ${canEdit ? '<button class="btn ghost small" data-a="add" data-k="spells">+ Ajouter un sort</button>' : ''}
+          ${list.map(spellCard).join('')}
+          ${!list.length && !canEdit ? '<p class="muted small">Aucun sort noté.</p>' : ''}
+          ${canEdit ? `<button class="btn ghost small add-spell" data-a="add" data-k="spells" data-lvl="${l}">+ Ajouter un ${l === 0 ? 'sort mineur' : `sort de niveau ${l}`}</button>` : ''}
+          </div>`;
+        }).join('')}
+        ${!spells.length ? `<p class="muted small">Aucun sort pour l'instant.${canEdit ? ' Ajoute tes sorts connus ou préparés : temps d\'incantation, portée, durée, jet et effet s\'affichent ensuite en un coup d\'œil.' : ''}</p>` : ''}
+        ${canEdit && levels.length < 10 ? `<button class="btn ghost small" data-a="add" data-k="spells">+ Ajouter un sort${levels.length ? " d'un autre niveau" : ''}</button>` : ''}
         ${Object.entries(SPELL_SUGGEST).map(([k, list]) => `<datalist id="sp-${k}">${list.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
       </section>`;
   }
@@ -2312,6 +2324,7 @@ function sheetView(id) {
       case 'ac-sug': c.ac = R.suggestedAC(c); break;
       case 'add': {
         const blank = { attacks: { name: '', bonus: '', damage: '', notes: '' }, resources: { name: '', value: 1, max: 1 }, spells: { name: '', level: 0, prepared: false, notes: '' } }[k];
+        if (k === 'spells') blank.level = Number(a.dataset.lvl) || 0;
         c[k] = [...(c[k] ?? []), blank];
         if (k === 'spells') openSpells.add(c.spells.length - 1);
         break;
