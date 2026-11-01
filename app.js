@@ -1,13 +1,13 @@
-import * as store from './store.js?v=202611011444';
+import * as store from './store.js?v=202611011609';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202611011444';
-import * as R from './rules.js?v=202611011444';
+} from './data.js?v=202611011609';
+import * as R from './rules.js?v=202611011609';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202611011444';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011444';
+} from './info.js?v=202611011609';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011609';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -1758,6 +1758,46 @@ function wizardView() {
 
 // ── Fiche de personnage ─────────────────────────────────────
 
+// ── Sorts : caractéristiques structurées ────────────────────
+
+const SCHOOLS = ['Abjuration', 'Divination', 'Enchantement', 'Évocation', 'Illusion', 'Invocation', 'Nécromancie', 'Transmutation'];
+const SPELL_SUGGEST = {
+  castingTime: ['1 action', '1 action bonus', '1 réaction', '1 minute', '10 minutes', '1 heure'],
+  range: ['Personnelle', 'Contact', '1,5 m', '9 m', '18 m', '27 m', '36 m', '45 m', '90 m', '150 m', 'Illimitée'],
+  duration: ['Instantanée', '1 round', '1 minute', '10 minutes', '1 heure', '8 heures', '24 heures', "Jusqu'à dissipation"],
+};
+const spellLevelLabel = l => (l === 0 ? 'Sort mineur' : `Niveau ${l}`);
+
+// Ligne « jet » : attaque de sort ou jet de sauvegarde, avec les valeurs du personnage.
+function spellRoll(c, s) {
+  const sp = R.spellInfo(c);
+  if (s.roll === 'attack') return `Attaque de sort ${sp ? R.fmt(sp.attack) : ''}`.trim();
+  if (s.roll && s.roll !== 'none') return `JS ${byId(ABILITIES, s.roll)?.name ?? s.roll}${sp ? ` · DD ${sp.dc}` : ''}`;
+  return '';
+}
+
+const spellComponents = s => [s.compV && 'V', s.compS && 'S', s.compM && 'M'].filter(Boolean).join(', ');
+
+// Résumé lisible d'un sort : école, pastilles (incantation, portée, durée…), jet et effet.
+function spellSummary(c, s) {
+  const lvl = Number(s.level) || 0;
+  const chip = (icon, label, value, cls = '') => value ? `<span class="sp-chip ${cls}" title="${esc(label)}"><span aria-hidden="true">${icon}</span><span class="sr">${esc(label)} :</span> ${esc(value)}</span>` : '';
+  const comps = spellComponents(s);
+  const roll = spellRoll(c, s);
+  return `<span class="sp-title"><b>${esc(s.name || 'Sort sans nom')}</b>
+      <span class="sp-meta">${esc([s.school, spellLevelLabel(lvl)].filter(Boolean).join(' · '))}</span>
+      ${s.concentration ? '<span class="badge magic" title="Concentration : un seul sort de concentration à la fois">Concentration</span>' : ''}
+      ${s.ritual ? '<span class="badge" title="Peut être lancé comme rituel (+10 minutes, sans emplacement)">Rituel</span>' : ''}</span>
+    <span class="sp-chips">
+      ${chip('⏱', 'Temps d\'incantation', s.castingTime)}
+      ${chip('📏', 'Portée', s.range)}
+      ${chip('⌛', 'Durée', s.duration ? `${s.concentration ? 'Concentration, ' : ''}${s.duration}` : '')}
+      ${chip('✋', 'Composantes', comps ? `${comps}${s.compM && s.material ? ` (${s.material})` : ''}` : '')}
+      ${chip('🎯', 'Jet', roll, 'roll')}
+      ${chip('💥', 'Effet', s.effect, 'effect')}
+    </span>`;
+}
+
 const TABS = [['combat', 'Combat & stats'], ['spells', 'Sorts'], ['gear', 'Équipement'], ['story', 'Histoire']];
 
 function sheetView(id) {
@@ -1769,6 +1809,7 @@ function sheetView(id) {
   let canEdit = false;
   let settingsOpen = null; // panneau « Réglages de classe » ouvert par le joueur
   let spellQuery = ''; // recherche dans l'onglet Sorts
+  const openSpells = new Set(); // sorts dépliés (index dans c.spells)
 
   const dis = () => (canEdit ? '' : 'disabled');
   const val = p => getPath(c, p) ?? '';
@@ -2061,18 +2102,58 @@ function sheetView(id) {
       <section class="card spells-card">
         <div class="row spread"><h2>Sorts</h2>${spells.length > 1 ? searchBox(spellQuery, 'Rechercher un sort…') : ''}</div>
         <p class="muted small" data-search-empty hidden>Aucun sort ne correspond à ta recherche.</p>
-        ${spells.length ? levels.map(l => `<div data-search-group>
-          <h3 class="spell-level">${l === 0 ? 'Sorts mineurs' : `Niveau ${l}`}</h3>
-          <table class="list-table spells"><thead><tr><th class="w-prep" title="Préparé">Prép.</th><th>Nom</th><th class="w-lvl">Niv.</th><th>Notes (portée, durée, effet…)</th>${canEdit ? '<th></th>' : ''}</tr></thead>
-          <tbody>${spells.filter(s => (Number(s.level) || 0) === l).map(s => `<tr data-search="${esc(norm(`${s.name} ${s.notes} ${l === 0 ? 'mineur' : `niveau ${l}`}`))}">
-            <td><input type="checkbox" data-p="spells.${s.i}.prepared" data-t="bool" ${s.prepared ? 'checked' : ''} ${dis()}></td>
-            <td>${inp(`spells.${s.i}.name`)}</td>
-            <td><select data-p="spells.${s.i}.level" data-t="num" data-r ${dis()}>${Array.from({ length: 10 }, (_, n) => `<option value="${n}" ${n === l ? 'selected' : ''}>${n === 0 ? 'Mineur' : n}</option>`).join('')}</select></td>
-            <td>${inp(`spells.${s.i}.notes`)}</td>
-            ${canEdit ? `<td><button class="icon" data-a="del" data-k="spells" data-n="${s.i}" title="Supprimer">✕</button></td>` : ''}
-          </tr>`).join('')}</tbody></table></div>`).join('') : '<p class="muted small">Aucun sort pour l\'instant.</p>'}
+        ${spells.length ? levels.map(l => {
+          const list = spells.filter(s => (Number(s.level) || 0) === l);
+          return `<div data-search-group>
+          <h3 class="spell-level">${l === 0 ? 'Sorts mineurs' : `Niveau ${l}`}
+            ${l > 0 && slots[l - 1] ? `<small class="muted">· ${slots[l - 1] - Math.min(slots[l - 1], used[l - 1] || 0)}/${slots[l - 1]} emplacements</small>` : ''}</h3>
+          ${list.map(spellCard).join('')}</div>`;
+        }).join('') : `<p class="muted small">Aucun sort pour l'instant.${canEdit ? ' Ajoute tes sorts connus ou préparés : temps d\'incantation, portée, durée, jet et effet s\'affichent ensuite en un coup d\'œil.' : ''}</p>`}
         ${canEdit ? '<button class="btn ghost small" data-a="add" data-k="spells">+ Ajouter un sort</button>' : ''}
+        ${Object.entries(SPELL_SUGGEST).map(([k, list]) => `<datalist id="sp-${k}">${list.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
       </section>`;
+  }
+
+  function spellCard(s) {
+    const lvl = Number(s.level) || 0;
+    const open = openSpells.has(s.i);
+    const f = (key, label, opts = {}) => `<label class="${opts.wide ? 'wide' : opts.cls ?? ''}">${label}
+      ${opts.list ? `<input data-p="spells.${s.i}.${key}" list="sp-${key}" value="${esc(s[key] ?? '')}" placeholder="${esc(opts.ph ?? '')}" ${dis()}>`
+        : `<input data-p="spells.${s.i}.${key}" value="${esc(s[key] ?? '')}" placeholder="${esc(opts.ph ?? '')}" ${dis()}>`}</label>`;
+    const check = (key, label, title = '') => `<label class="chk" title="${esc(title)}"><input type="checkbox" data-p="spells.${s.i}.${key}" data-t="bool" ${s[key] ? 'checked' : ''} ${dis()}> ${label}</label>`;
+    return `<article class="spell${open ? ' open' : ''}${s.prepared || lvl === 0 ? ' prepared' : ''}" data-search="${esc(norm([s.name, s.school, s.notes, s.effect, s.castingTime, s.range, s.duration, s.concentration && 'concentration', s.ritual && 'rituel', lvl === 0 ? 'mineur' : `niveau ${lvl}`].filter(Boolean).join(' ')))}">
+      <div class="spell-top">
+        ${lvl === 0 ? '<span class="sp-prep always" title="Les sorts mineurs sont toujours prêts">∞</span>'
+          : `<label class="sp-prep" title="Sort préparé"><input type="checkbox" data-p="spells.${s.i}.prepared" data-t="bool" data-r ${s.prepared ? 'checked' : ''} ${dis()}><span class="sr">Préparé</span></label>`}
+        <button class="spell-head" data-a="spell-toggle" data-n="${s.i}" aria-expanded="${open}" data-spell-sum="${s.i}">${spellSummary(c, s)}</button>
+        <button class="icon sp-caret" data-a="spell-toggle" data-n="${s.i}" title="${open ? 'Replier' : canEdit ? 'Détails et modification' : 'Détails'}" aria-hidden="true">${open ? '▴' : '▾'}</button>
+      </div>
+      ${open ? `<div class="spell-body">
+        ${s.notes && !canEdit ? `<p class="sp-desc">${esc(s.notes)}</p>` : ''}
+        <div class="sp-fields">
+          ${f('name', 'Nom', { ph: 'ex. Boule de feu' })}
+          <label>Niveau<select data-p="spells.${s.i}.level" data-t="num" data-r ${dis()}>${Array.from({ length: 10 }, (_, n) => `<option value="${n}" ${n === lvl ? 'selected' : ''}>${n === 0 ? 'Sort mineur' : `Niveau ${n}`}</option>`).join('')}</select></label>
+          <label>École<select data-p="spells.${s.i}.school" ${dis()}><option value="">—</option>${SCHOOLS.map(x => `<option ${s.school === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+          ${f('castingTime', "Temps d'incantation", { list: true, ph: '1 action' })}
+          ${f('range', 'Portée', { list: true, ph: '18 m' })}
+          ${f('duration', 'Durée', { list: true, ph: 'Instantanée' })}
+          <label>Jet<select data-p="spells.${s.i}.roll" ${dis()}>
+            <option value="none">Aucun</option>
+            <option value="attack" ${s.roll === 'attack' ? 'selected' : ''}>Attaque de sort</option>
+            ${ABILITIES.map(a => `<option value="${a.id}" ${s.roll === a.id ? 'selected' : ''}>JS ${a.name}</option>`).join('')}</select></label>
+          ${f('effect', 'Dégâts / effet', { ph: 'ex. 8d6 feu, moitié si réussite', cls: 'span2' })}
+          <div class="sp-checks">
+            <span class="lbl-inline">Composantes</span>
+            ${check('compV', 'V', 'Verbale')}${check('compS', 'S', 'Somatique')}${check('compM', 'M', 'Matérielle')}
+            ${check('concentration', 'Concentration')}${check('ritual', 'Rituel')}
+          </div>
+          ${s.compM || s.material ? f('material', 'Composante matérielle', { wide: true, ph: 'ex. une boulette de guano et de soufre' }) : ''}
+          ${f('higher', 'Aux niveaux supérieurs', { wide: true, ph: 'ex. +1d6 par niveau d\'emplacement au-delà du 3' })}
+          ${canEdit ? `<label class="wide">Description / notes<textarea data-p="spells.${s.i}.notes" rows="3" placeholder="Effet du sort, en quelques mots">${esc(s.notes ?? '')}</textarea></label>` : ''}
+        </div>
+        ${canEdit ? `<div class="row"><button class="btn ghost small danger" data-a="del" data-k="spells" data-n="${s.i}">Supprimer ce sort</button></div>` : ''}
+      </div>` : ''}
+    </article>`;
   }
 
   function gearTab() {
@@ -2131,6 +2212,10 @@ function sheetView(id) {
     } else if (t.dataset.p) {
       const v = t.dataset.t === 'num' ? toNum(t.value) : t.dataset.t === 'bool' ? t.checked : t.value;
       setPath(c, t.dataset.p, v);
+      const sm = t.dataset.p.match(/^spells\.(\d+)\./);
+      const sum = sm && root.querySelector(`[data-spell-sum="${sm[1]}"]`);
+      if (sum) sum.innerHTML = spellSummary(c, c.spells[sm[1]]);
+      if (/^spells\.\d+\.compM$/.test(t.dataset.p)) { render(); save(); return; }
     } else return;
     updateDerived();
     save();
@@ -2156,6 +2241,7 @@ function sheetView(id) {
     const { a: act, k } = a.dataset;
     const n = Number(a.dataset.n);
     if (act === 'tab') { tab = k; render(); return; }
+    if (act === 'spell-toggle') { openSpells.has(n) ? openSpells.delete(n) : openSpells.add(n); render(); return; }
     if (act === 'print') { window.print(); return; }
     if (act === 'export') {
       const blob = new Blob([JSON.stringify(c, null, 2)], { type: 'application/json' });
@@ -2227,9 +2313,14 @@ function sheetView(id) {
       case 'add': {
         const blank = { attacks: { name: '', bonus: '', damage: '', notes: '' }, resources: { name: '', value: 1, max: 1 }, spells: { name: '', level: 0, prepared: false, notes: '' } }[k];
         c[k] = [...(c[k] ?? []), blank];
+        if (k === 'spells') openSpells.add(c.spells.length - 1);
         break;
       }
-      case 'del': c[k].splice(n, 1); break;
+      case 'del':
+        if (k === 'spells' && !confirm(`Supprimer le sort « ${c.spells[n]?.name || 'sans nom'} » ?`)) return;
+        c[k].splice(n, 1);
+        if (k === 'spells') openSpells.clear();
+        break;
       case 'longrest': {
         if (!confirm('Repos long : restaurer PV, emplacements de sorts, ressources et la moitié des dés de vie ?')) return;
         c.hp.current = c.hp.max;
