@@ -5,6 +5,8 @@ Site de création et de suivi des fiches de personnage **Donjons & Dragons 5.5**
 - Chacun **crée son compte**, puis **crée une campagne** (il en devient automatiquement le MJ) ou **rejoint** celle d'un ami avec son **code d'invitation**. On peut faire partie de plusieurs campagnes et passer de l'une à l'autre depuis « Mes campagnes ».
 - Dans chaque campagne, les joueurs créent **leurs personnages** avec un assistant en 7 étapes : classe, espèce, historique (bonus +2/+1 ou +1/+1/+1 et don d'origine), caractéristiques (tableau standard, achat de points ou dés), compétences, niveau, finalisation.
 - **Fiche complète** : caractéristiques, jets de sauvegarde, compétences (maîtrise / expertise), PV avec dégâts/soins rapides, dés de vie, jets contre la mort, états, attaques, ressources de classe, sorts et emplacements (lanceurs complets, semi-lanceurs, magie de pacte), bourse, équipement, histoire. Les valeurs dérivées (modificateurs, maîtrise, initiative, perception passive, DD des sorts…) sont calculées automatiquement.
+- **Lanceur de dés** intégré (bouton 🎲 en bas à droite) : d4 à d100, expressions comme `2d6+3`, avantage / désavantage, historique. Sur la fiche, un clic sur une compétence, une sauvegarde, l'initiative, une attaque, des dégâts ou un sort lance directement le bon jet. À la création, chaque joueur peut lancer lui-même ses caractéristiques (4d6, 3 meilleurs) et les placer où il veut.
+- **Personnage aléatoire** : tirage totalement libre, avec conditions (magie oui / un peu / non), ou questionnaire de personnalité qui révèle la classe, l'espèce et l'historique qui te ressemblent.
 - **Vue du groupe** : toutes les fiches du groupe, PV, CA et états **en direct**, ainsi qu'un tableau comparatif des caractéristiques et des perceptions passives.
 - Chacun peut **consulter** toutes les fiches de sa campagne, mais seul son propriétaire peut les **modifier**. Le **MJ** de la campagne peut modifier toutes ses fiches (pratique pour les PV en combat). Les campagnes sont séparées : on ne voit que celles dont on est membre.
 
@@ -110,6 +112,7 @@ Pour tester sur ton ordinateur : `python3 -m http.server` dans le dossier, puis 
 | `style.css` | Style (thème clair/sombre automatique, impression) |
 | `config.js` | **Configuration Supabase** |
 | `data.js`, `extensions.js`, `progression.js`, `info.js` | Règles 2024 et extensions : classes, espèces, historiques, dons, progression, fiches d'aide |
+| `dice.js` | Lancer de dés (expressions, avantage, 4d6 en gardant les 3 meilleurs) |
 | `rules.js` | Calculs (modificateurs, maîtrise, PV, CA, DD des sorts…) |
 | `store.js` | Stockage : Supabase ou localStorage |
 | `app.js` | Interface : connexion, campagnes, groupe, assistant de création, fiche, bibliothèque |

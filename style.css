@@ -548,3 +548,82 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 .quiz-result { margin-bottom: 14px; border-color: var(--magic); background: linear-gradient(135deg, var(--magic-soft), var(--card) 60%); }
 .quiz-result h2 { margin: 2px 0 6px; font-size: 1.6rem; }
 .quiz-result h2 small { font-size: .9rem; color: var(--muted); }
+
+/* Lanceur de dés */
+.dice-fab {
+  position: fixed; right: 16px; bottom: 84px; z-index: 60; width: 54px; height: 54px; border-radius: 50%;
+  border: 0; background: var(--accent); color: #fff; font-size: 1.6rem; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  transition: transform .15s;
+}
+.dice-fab:hover { transform: rotate(-15deg) scale(1.06); }
+.dice-fab.open { background: var(--magic); }
+.dice-tray {
+  position: fixed; right: 16px; bottom: 148px; z-index: 60; width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 170px); overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25);
+}
+.dice-head { display: flex; justify-content: space-between; align-items: center; }
+.dice-head h2 { margin: 0; }
+.dice-quick { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 10px 0 8px; }
+.die-btn { font: 700 .8rem Inter, sans-serif; padding: 8px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.die-btn:hover { border-color: var(--accent); color: var(--accent); }
+.dice-form { display: flex; gap: 6px; align-items: center; }
+.dice-form input { flex: 1; font: 600 1.05rem ui-monospace, monospace; text-align: center; }
+.dice-form input.invalid { border-color: var(--danger); }
+.dice-opts { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.dice-opts .seg { margin: 0; }
+.dice-opts .seg button { padding: 5px 9px; font-size: .82rem; }
+.dice-result { text-align: center; margin: 12px 0 4px; padding: 10px; border-radius: 10px; background: var(--bg); }
+.dice-result.pop { animation: dice-pop .35s ease-out; }
+@keyframes dice-pop { 0% { transform: scale(.85) rotate(-3deg); opacity: .3; } 70% { transform: scale(1.05); } 100% { transform: none; opacity: 1; } }
+.dice-result.crit { background: color-mix(in srgb, var(--ok) 15%, var(--bg)); }
+.dice-result.fumble { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); }
+.dice-label { font-weight: 600; margin-bottom: 2px; }
+.dice-total { font: 700 2.6rem Cinzel, Georgia, serif; line-height: 1.1; }
+.dice-faces { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; margin: 6px 0; }
+.die {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 4px;
+  border-radius: 7px; border: 2px solid var(--ink); font: 700 .9rem Inter, sans-serif; background: var(--card);
+}
+.die.d20 { border-radius: 50% 50% 8px 8px; }
+.die.dropped { opacity: .4; text-decoration: line-through; border-style: dashed; }
+.die.crit { background: var(--ok); color: #fff; border-color: var(--ok); }
+.die.fumble { background: var(--danger); color: #fff; border-color: var(--danger); }
+.dice-faces .op { color: var(--muted); font-weight: 700; padding: 0 2px; }
+.dice-faces .flat { font-weight: 700; }
+.dice-hist-head { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.dice-hist-head .link { padding: 0; font-size: .8rem; }
+.dice-hist { list-style: none; padding: 0; margin: 4px 0 0; }
+.dice-hist button {
+  width: 100%; display: flex; justify-content: space-between; gap: 8px; text-align: left; font: inherit; font-size: .85rem;
+  background: none; border: 0; border-bottom: 1px solid var(--line); padding: 5px 2px; color: var(--ink); cursor: pointer;
+}
+.dice-hist button:hover { background: var(--bg); }
+.hist-total { font-weight: 700; min-width: 2.2em; text-align: right; }
+.hist-total.crit { color: var(--ok); }
+.hist-total.fumble { color: var(--danger); }
+
+/* Jets depuis la fiche */
+button.roll { font: inherit; color: inherit; background: none; border: 1px dashed transparent; border-radius: 8px; cursor: pointer; padding: 0 4px; }
+button.roll:hover, button.roll:focus-visible { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+b.big, button.roll.big { font-weight: 700; }
+.roll-mini {
+  font: 600 .72rem Inter, sans-serif; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  border-radius: 6px; padding: 2px 5px; cursor: pointer; margin: 0 1px; white-space: nowrap;
+}
+.roll-mini:hover { border-color: var(--accent); }
+.list-table .w-roll { width: 70px; }
+
+/* Création : caractéristiques aux dés */
+.dice-pool-box { margin: 8px 0 12px; }
+.dice-pool { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 10px; }
+.pool-roll { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.pool-roll.used { border-color: var(--ok); }
+.pool-roll .die { min-width: 24px; height: 24px; font-size: .8rem; }
+.pool-total { font: 700 1.4rem Cinzel, Georgia, serif; }
+@media print { #dice-root { display: none; } }
+.stat button.roll.big { font-size: 1.6rem; }
+.sk-bonus.roll { width: 40px; padding: 0 3px; }
+.ability .mod.roll { font-weight: 700; }
+.dice-hist { max-height: 170px; overflow-y: auto; }
+.dice-tray { max-height: min(600px, calc(100vh - 170px)); }
+.abil-table select[data-dice-assign] { min-width: 120px; }

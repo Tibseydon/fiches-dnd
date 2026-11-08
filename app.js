@@ -1,13 +1,14 @@
-import * as store from './store.js?v=202611081411';
+import * as store from './store.js?v=202611081426';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202611081411';
-import * as R from './rules.js?v=202611081411';
+} from './data.js?v=202611081426';
+import { rollDice as rollExpr, addDie, addModifier, parseDice, findDice } from './dice.js?v=202611081426';
+import * as R from './rules.js?v=202611081426';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202611081411';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611081411';
+} from './info.js?v=202611081426';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611081426';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -258,6 +259,121 @@ function hpBar(c) {
   </div>`;
 }
 
+// ── Lanceur de dés ──────────────────────────────────────────
+// Bouton 🎲 toujours accessible ; les fiches y envoient leurs jets (compétences, attaques…).
+// L'historique reste sur l'appareil.
+
+const DICE_KEY = 'dnd55.diceHistory';
+const DICE_SIDES = [4, 6, 8, 10, 12, 20, 100];
+const dice = { open: false, expr: '1d20', mode: 'normal', last: null, history: [] };
+try { dice.history = JSON.parse(localStorage.getItem(DICE_KEY)) ?? []; } catch { dice.history = []; }
+
+const diceFace = (sides, r) => `<span class="die d${sides}${r.kept ? '' : ' dropped'}${sides === 20 && r.kept && (r.v === 20 || r.v === 1) ? (r.v === 20 ? ' crit' : ' fumble') : ''}" title="d${sides}">${r.v}</span>`;
+const diceDetail = r => `${r.groups.map((g, gi) => `${g.sign < 0 ? '<span class="op">−</span>' : gi ? '<span class="op">+</span>' : ''}${g.rolls.map(x => diceFace(g.sides, x)).join('')}`).join('')}${r.flat ? `<span class="op">${r.flat > 0 ? '+' : '−'}</span><span class="flat">${Math.abs(r.flat)}</span>` : ''}`;
+const modeLabel = { normal: '', adv: 'avantage', dis: 'désavantage' };
+
+function diceRoot() {
+  let el = document.getElementById('dice-root');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dice-root';
+    document.body.append(el);
+    el.addEventListener('click', onDiceClick);
+    el.addEventListener('submit', e => { e.preventDefault(); doRoll(dice.expr); });
+    el.addEventListener('input', e => {
+      if (e.target.id !== 'dice-expr') return;
+      dice.expr = e.target.value;
+      const ok = !!parseDice(dice.expr);
+      e.target.classList.toggle('invalid', !ok && !!dice.expr);
+      const btn = el.querySelector('[data-dice=roll]');
+      btn.disabled = !ok;
+      btn.textContent = `🎲 Lancer ${ok ? dice.expr.replace(/\s+/g, '') : ''}`;
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && dice.open) { dice.open = false; renderDice(); } });
+    // Un clic ailleurs sur la page ferme le panneau (sauf un clic qui lance un jet).
+    document.addEventListener('click', e => {
+      // (un élément retiré du document entre-temps, comme le bouton 🎲 redessiné, ne compte pas)
+      if (dice.open && e.target.isConnected && !e.target.closest('#dice-root, [data-roll]')) { dice.open = false; renderDice(); }
+    });
+  }
+  return el;
+}
+
+function renderDice() {
+  const root = diceRoot();
+  root.hidden = !me || !!me.noProfile;
+  const r = dice.last;
+  const valid = !!parseDice(dice.expr);
+  root.innerHTML = `
+    <button class="dice-fab${dice.open ? ' open' : ''}" data-dice="toggle" aria-expanded="${dice.open}" title="Lancer des dés">🎲</button>
+    ${dice.open ? `<section class="dice-tray card" role="dialog" aria-label="Lancer de dés">
+      <div class="dice-head"><h2>Lancer de dés</h2><button class="icon" data-dice="close" aria-label="Fermer">✕</button></div>
+      <div class="dice-quick">${DICE_SIDES.map(n => `<button class="die-btn" data-dice="add" data-v="${n}" title="Ajouter un d${n}">d${n}</button>`).join('')}</div>
+      <form class="dice-form">
+        <button type="button" class="btn ghost small" data-dice="mod" data-v="-1" title="Modificateur −1">−1</button>
+        <input id="dice-expr" value="${esc(dice.expr)}" placeholder="ex. 2d6+3" autocomplete="off" spellcheck="false" aria-label="Dés à lancer" class="${valid || !dice.expr ? '' : 'invalid'}">
+        <button type="button" class="btn ghost small" data-dice="mod" data-v="1" title="Modificateur +1">+1</button>
+      </form>
+      <div class="dice-opts">
+        <div class="seg" title="Avantage / désavantage : sur un d20, on lance deux dés et on garde le meilleur / le moins bon">
+          ${Object.entries({ normal: 'Normal', adv: 'Avantage', dis: 'Désavantage' }).map(([k, l]) => `<button data-dice="mode" data-v="${k}" class="${dice.mode === k ? 'active' : ''}">${l}</button>`).join('')}
+        </div>
+        <button class="btn ghost small" data-dice="clear-expr">Effacer</button>
+      </div>
+      <button class="btn primary block" data-dice="roll" ${valid ? '' : 'disabled'}>🎲 Lancer ${valid ? esc(dice.expr) : ''}</button>
+      ${r ? `<div class="dice-result${r.nat === 20 ? ' crit' : r.nat === 1 ? ' fumble' : ''}" aria-live="polite">
+        ${r.label ? `<div class="dice-label">${esc(r.label)}</div>` : ''}
+        <div class="dice-total">${r.total}</div>
+        <div class="dice-faces">${diceDetail(r)}</div>
+        <div class="small muted">${esc(r.expr)}${r.mode !== 'normal' ? ` · ${modeLabel[r.mode]}` : ''}${r.nat === 20 ? ' · <b>20 naturel !</b>' : r.nat === 1 ? ' · <b>1 naturel…</b>' : ''}</div>
+      </div>` : '<p class="small muted">Clique sur les dés pour composer ton jet (ex. 2 clics sur d6 = 2d6), ou écris-le directement. Les jets de ta fiche s\'affichent aussi ici.</p>'}
+      ${dice.history.length ? `<div class="dice-hist-head"><span class="lbl">Historique</span><button class="link small" data-dice="clear-hist">Effacer</button></div>
+        <ol class="dice-hist">${dice.history.map((h, i) => `<li><button data-dice="again" data-v="${i}" title="Relancer">
+          <span>${h.label ? `<b>${esc(h.label)}</b> · ` : ''}${esc(h.expr)}${h.mode !== 'normal' ? ` (${modeLabel[h.mode]})` : ''}</span>
+          <span class="hist-total${h.nat === 20 ? ' crit' : h.nat === 1 ? ' fumble' : ''}">${h.total}</span></button></li>`).join('')}</ol>` : ''}
+    </section>` : ''}`;
+}
+
+function recordRoll(r, label) {
+  r.label = label;
+  dice.last = r;
+  dice.history = [{ label, expr: r.expr, total: r.total, nat: r.nat, mode: r.mode, at: Date.now() }, ...dice.history].slice(0, 20);
+  try { localStorage.setItem(DICE_KEY, JSON.stringify(dice.history)); } catch { /* historique non mémorisé */ }
+}
+
+// Lance une expression, l'affiche et l'ajoute à l'historique. Utilisable partout (fiche, création…).
+function doRoll(expr, label = '', mode = dice.mode) {
+  const r = rollExpr(expr, mode);
+  if (!r) { toast(`« ${expr} » n'est pas un jet valide (ex. 1d20+5, 2d6+3, 4d6kh3).`, 'error'); return null; }
+  recordRoll(r, label);
+  dice.open = true;
+  renderDice();
+  const res = document.querySelector('.dice-result');
+  res?.classList.add('pop');
+  return r;
+}
+
+function onDiceClick(e) {
+  const b = e.target.closest('[data-dice]');
+  if (!b) return;
+  const { dice: act, v } = b.dataset;
+  if (act === 'toggle') dice.open = !dice.open;
+  if (act === 'close') dice.open = false;
+  if (act === 'add') dice.expr = addDie(parseDice(dice.expr) ? dice.expr : '', Number(v));
+  if (act === 'mod') dice.expr = addModifier(parseDice(dice.expr) ? dice.expr : '1d20', Number(v));
+  if (act === 'mode') dice.mode = v;
+  if (act === 'clear-expr') dice.expr = '';
+  if (act === 'clear-hist') { dice.history = []; try { localStorage.removeItem(DICE_KEY); } catch { /* rien */ } }
+  if (act === 'roll') { doRoll(dice.expr); return; }
+  if (act === 'again') {
+    const h = dice.history[Number(v)];
+    if (h) { dice.expr = h.expr; doRoll(h.expr, h.label, h.mode); }
+    return;
+  }
+  renderDice();
+  if (act === 'add' || act === 'mod') document.getElementById('dice-expr')?.focus();
+}
+
 // ── Mode joueur du MJ ───────────────────────────────────────
 // Le MJ peut utiliser le site comme un joueur. Simple préférence d'affichage, mémorisée
 // sur l'appareil : ses droits en base ne changent pas, et un joueur ne voit jamais ce bouton.
@@ -343,6 +459,7 @@ const roleLabel = role => (role === 'mj' ? 'MJ' : 'Joueur');
 // ── Navigation ──────────────────────────────────────────────
 
 function renderNav() {
+  renderDice();
   if (!me) { $nav.innerHTML = ''; return; }
   const h = location.hash;
   const home = !campaign || /^#\/(accueil|rejoindre)/.test(h);
@@ -1508,7 +1625,8 @@ function wizardView() {
     name: '', level: 1, alignment: '', portrait: '', personality: '', backstory: '',
     customClassName: '', customSpeciesName: '', source: 'all',
     subclass: '', levelChoices: [], search: '',
-    rnd: { open: false, mode: 'cond', magic: 'any' }, rolled: false,
+    rnd: { open: false, mode: 'cond', magic: 'any', stats: 'player' }, rolled: false, rolledFree: false,
+    diceRolls: [], diceAssign: {},
     quiz: { started: false, i: 0, answers: [] }, quizResult: null,
   };
   const root = mount('');
@@ -1555,6 +1673,52 @@ function wizardView() {
     ch.kind === 'asi' ? !!ch.a && (ch.mode === '2' || (!!ch.b && ch.b !== ch.a)) : !!ch.feat?.trim())
     && Object.values(totals()).every(v => v <= 20);
 
+  // Caractéristiques aux dés : le joueur lance 6 fois 4d6 (3 meilleurs) et place chaque résultat.
+  const diceComplete = () => w.diceRolls.length === 6
+    && ABILITIES.every(a => Number.isInteger(w.diceAssign[a.id]))
+    && new Set(Object.values(w.diceAssign)).size === 6;
+  const applyDice = () => ABILITIES.forEach(a => {
+    const r = w.diceRolls[w.diceAssign[a.id]];
+    w.base[a.id] = r ? r.total : 8;
+  });
+  const rollStat = () => {
+    const r = rollExpr('4d6kh3');
+    recordRoll(r, `Création · caractéristique n°${w.diceRolls.length + 1}`);
+    w.diceRolls.push({ total: r.total, faces: r.groups[0].rolls });
+  };
+  const assignDice = (ab, idx) => {
+    const other = ABILITIES.find(x => x.id !== ab && w.diceAssign[x.id] === idx);
+    if (other) {
+      if (Number.isInteger(w.diceAssign[ab])) w.diceAssign[other.id] = w.diceAssign[ab];
+      else delete w.diceAssign[other.id];
+    }
+    if (Number.isInteger(idx)) w.diceAssign[ab] = idx; else delete w.diceAssign[ab];
+    applyDice();
+    // Personnage tiré au sort : améliorations recalculées une fois les dés placés.
+    if (w.rolled && diceComplete()) distributeChoices(w.rolledFree);
+  };
+
+  // Améliorations de caractéristiques (sans dépasser 20) et don épique.
+  function distributeChoices(free) {
+    w.levelChoices = [];
+    const t = { ...totals() };
+    syncChoices();
+    w.levelChoices.forEach(ch => {
+      if (ch.kind === 'boon') { ch.feat = pickOne(EPIC_BOONS); return; }
+      const ranked = free ? shuffle(ABILITIES.map(a => a.id)) : order();
+      const room = n => ranked.find(ab => t[ab] + n <= 20);
+      ch.kind = 'asi';
+      // Hasard : +2 ou +1/+1 au hasard. Cohérent : on monte la meilleure caractéristique jusqu'à 20.
+      ch.mode = free ? pickOne(['2', '11']) : room(1) && t[room(1)] + 2 <= 20 ? '2' : '11';
+      if (ch.mode === '2' && !room(2)) ch.mode = '11';
+      ch.a = ch.mode === '2' ? room(2) : room(1);
+      ch.b = ch.mode === '11' ? ranked.find(ab => ab !== ch.a && t[ab] + 1 <= 20) : ch.a;
+      if (ch.mode === '2') t[ch.a] += 2; else { t[ch.a] += 1; if (ch.b) t[ch.b] += 1; }
+    });
+  }
+
+  const afterRandom = () => (w.method === 'dice' && !diceComplete() ? 3 : STEPS.length - 1);
+
   // Tirage au sort complet. « free » : tout au hasard, caractéristiques aux dés.
   // « cond » : au hasard dans les conditions choisies, avec un personnage cohérent (caractéristiques selon la classe).
   function randomize(quiz = null, varied = false) {
@@ -1597,7 +1761,17 @@ function wizardView() {
       }
 
       // Caractéristiques et bonus d'historique
-      if (free) {
+      const playerDice = w.rnd.stats === 'player';
+      if (playerDice) {
+        // Dés déjà lancés (nouveau tirage, autre proposition) : on garde les résultats du joueur.
+        if (w.method !== 'dice' || w.diceRolls.length !== 6) { w.diceRolls = []; w.diceAssign = {}; }
+        w.method = 'dice';
+        applyDice();
+        if (free) {
+          w.bgMode = pickOne(['21', '111']);
+          w.bgPicks = w.bgMode === '21' ? shuffle(bg().abilities).slice(0, 2) : [...bg().abilities];
+        } else { w.bgMode = '21'; defaultBgPicks(); }
+      } else if (free) {
         w.method = 'manual';
         ABILITIES.forEach(a => {
           const d = Array.from({ length: 4 }, () => roll(6) + 1).sort((x, y) => y - x);
@@ -1612,23 +1786,8 @@ function wizardView() {
         defaultBgPicks();
       }
 
-      // Améliorations de caractéristiques (sans dépasser 20) et don épique
-      // Totaux avant les améliorations (base + historique), puis répartition des améliorations.
-      w.levelChoices = [];
-      const t = { ...totals() };
-      syncChoices();
-      w.levelChoices.forEach(ch => {
-        if (ch.kind === 'boon') { ch.feat = pickOne(EPIC_BOONS); return; }
-        const ranked = free ? shuffle(ABILITIES.map(a => a.id)) : order();
-        const room = n => ranked.find(ab => t[ab] + n <= 20);
-        ch.kind = 'asi';
-        // Hasard : +2 ou +1/+1 au hasard. Cohérent : on monte la meilleure caractéristique jusqu'à 20.
-        ch.mode = free ? pickOne(['2', '11']) : room(1) && t[room(1)] + 2 <= 20 ? '2' : '11';
-        if (ch.mode === '2' && !room(2)) ch.mode = '11';
-        ch.a = ch.mode === '2' ? room(2) : room(1);
-        ch.b = ch.mode === '11' ? ranked.find(ab => ab !== ch.a && t[ab] + 1 <= 20) : ch.a;
-        if (ch.mode === '2') t[ch.a] += 2; else { t[ch.a] += 1; if (ch.b) t[ch.b] += 1; }
-      });
+      // Améliorations de caractéristiques (recalculées après les dés du joueur)
+      distributeChoices(free);
 
       // Compétences
       const owned = ownedSkills();
@@ -1652,8 +1811,9 @@ function wizardView() {
         w.backstory = pickOne(HOOKS);
       }
 
-      if ([0, 1, 2, 3, 4, 5, 6].every(i => valid(i))) {
+      if ([0, 1, 2, 4, 5, 6].every(i => valid(i)) && (playerDice || valid(3))) {
         w.rolled = true;
+        w.rolledFree = free;
         w.source = 'all';
         return true;
       }
@@ -1667,7 +1827,8 @@ function wizardView() {
       case 1: return !!w.speciesId && (!sp().lineages || !!w.lineage)
         && (w.speciesId !== 'custom' || !!w.customSpeciesName.trim());
       case 2: return !!w.backgroundId && (w.bgMode === '111' || (w.bgPicks[0] && w.bgPicks[1] && w.bgPicks[0] !== w.bgPicks[1]));
-      case 3: return w.method !== 'pointbuy' || pbSpent() <= POINT_BUY_BUDGET;
+      case 3: return w.method === 'dice' ? diceComplete()
+        : w.method !== 'pointbuy' || pbSpent() <= POINT_BUY_BUDGET;
       case 4: return w.classSkills.length === cls().skillCount
         && (!sp().keenSenses || !!w.keenSense) && (!sp().skillful || !!w.skillful);
       case 5: return (!needsSubclass() || !!w.subclass) && choicesValid();
@@ -1773,33 +1934,42 @@ function wizardView() {
       return `<div class="seg">${infoBtn('stat:methods', 'méthodes')}
           <button data-a="method" data-v="standard" class="${w.method === 'standard' ? 'active' : ''}">Tableau standard</button>
           <button data-a="method" data-v="pointbuy" class="${w.method === 'pointbuy' ? 'active' : ''}">Achat de points</button>
-          <button data-a="method" data-v="manual" class="${w.method === 'manual' ? 'active' : ''}">Manuel / dés</button>
+          <button data-a="method" data-v="dice" class="${w.method === 'dice' ? 'active' : ''}">🎲 Lancer de dés</button>
+          <button data-a="method" data-v="manual" class="${w.method === 'manual' ? 'active' : ''}">Saisie libre</button>
         </div>
         <p class="muted">${{
           standard: 'Répartis les valeurs 15, 14, 13, 12, 10 et 8.',
           pointbuy: `Dépense ${POINT_BUY_BUDGET} points (valeurs de 8 à 15). Points restants : <b class="${spent > POINT_BUY_BUDGET ? 'error' : ''}">${POINT_BUY_BUDGET - spent}</b>`,
-          manual: 'Saisis tes valeurs, ou lance 4d6 en gardant les 3 meilleurs.',
+          dice: 'Lance 4d6 six fois : à chaque lancer, on garde les 3 meilleurs dés (le dé barré ne compte pas). Ensuite, place chaque résultat sur la caractéristique de ton choix.',
+          manual: 'Saisis tes valeurs, par exemple si tu as lancé de vrais dés à la table.',
         }[w.method]}</p>
         <div class="row">
           ${w.method === 'standard' ? '<button class="btn ghost small" data-a="suggest">Répartition conseillée pour la classe</button>' : ''}
-          ${w.method === 'manual' ? '<button class="btn ghost small" data-a="roll">🎲 Lancer 4d6 ×6</button>' : ''}
         </div>
+        ${w.method === 'dice' ? dicePool() : ''}
         <table class="abil-table">
           <thead><tr><th>Caractéristique</th><th>Base</th><th>Historique</th><th>Total</th><th>Mod.</th></tr></thead>
           <tbody>${ABILITIES.map(a => {
             const v = w.base[a.id];
+            const unset = w.method === 'dice' && !Number.isInteger(w.diceAssign[a.id]);
             const total = v + (bonus[a.id] ?? 0);
             let input;
             if (w.method === 'standard') {
               input = `<select data-std="${a.id}">${STANDARD_ARRAY.map(n => `<option ${n === v ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
             } else if (w.method === 'pointbuy') {
               input = `<div class="stepper"><button data-a="pb" data-k="${a.id}" data-v="-1" ${v <= 8 ? 'disabled' : ''}>−</button><b>${v}</b><button data-a="pb" data-k="${a.id}" data-v="1" ${v >= 15 ? 'disabled' : ''}>+</button></div>`;
+            } else if (w.method === 'dice') {
+              const cur = w.diceAssign[a.id];
+              input = w.diceRolls.length ? `<select data-dice-assign="${a.id}"><option value="">— Choisir —</option>${w.diceRolls.map((r, i) => {
+                const owner = ABILITIES.find(x => x.id !== a.id && w.diceAssign[x.id] === i);
+                return `<option value="${i}" ${cur === i ? 'selected' : ''}>${r.total} · n°${i + 1}${owner ? ` (${owner.short})` : ''}</option>`;
+              }).join('')}</select>` : '<span class="muted small">lance d’abord</span>';
             } else {
               input = `<input type="number" min="3" max="20" value="${v}" data-man="${a.id}">`;
             }
             const prim = order()[0] === a.id ? ' <span class="badge magic">principale</span>' : '';
             return `<tr><td>${a.name} ${infoBtn(`ability:${a.id}`, a.name)}${prim}</td><td>${input}</td><td>${bonus[a.id] ? `+${bonus[a.id]}` : '—'}</td>
-              <td><b>${total}</b></td><td>${R.fmt(R.mod(total))}</td></tr>`;
+              <td><b>${unset ? '—' : total}</b></td><td>${unset ? '—' : R.fmt(R.mod(total))}</td></tr>`;
           }).join('')}</tbody>
         </table>`;
     },
@@ -1915,6 +2085,29 @@ function wizardView() {
       </div>`,
   ];
 
+  function dicePool() {
+    const n = w.diceRolls.length;
+    const used = new Set(Object.values(w.diceAssign));
+    return `<div class="dice-pool-box">
+      <div class="row">
+        ${n < 6 ? `<button class="btn primary" data-a="dice-one">🎲 Lancer le n°${n + 1} (4d6)</button>
+          ${n < 5 ? `<button class="btn ghost small" data-a="dice-all">Lancer les ${6 - n} restants d'un coup</button>` : ''}`
+          : `<button class="btn ghost small" data-a="dice-best">Placement conseillé pour la classe</button>
+             <button class="btn ghost small" data-a="dice-reset">Tout relancer</button>`}
+      </div>
+      ${n ? `<div class="dice-pool">${w.diceRolls.map((r, i) => {
+        const owner = ABILITIES.find(x => w.diceAssign[x.id] === i);
+        return `<div class="pool-roll${used.has(i) ? ' used' : ''}">
+          <span class="small muted">n°${i + 1}</span>
+          <div class="dice-faces">${r.faces.map(f => diceFace(6, f)).join('')}</div>
+          <b class="pool-total">${r.total}</b>
+          <span class="small ${owner ? '' : 'muted'}">${owner ? `→ ${owner.short}` : 'à placer'}</span>
+        </div>`;
+      }).join('')}</div>
+      ${n === 6 && !diceComplete() ? '<p class="small muted">Place chaque résultat avec les menus du tableau ci-dessous.</p>' : ''}` : ''}
+    </div>`;
+  }
+
   function randomPanel() {
     const { mode, magic } = w.rnd;
     return `<section class="card rnd-panel">
@@ -1927,9 +2120,16 @@ function wizardView() {
           <button data-a="rnd-mode" data-v="quiz" class="${mode === 'quiz' ? 'active' : ''}">Questionnaire</button>
         </div>
       </div>
+      <div class="rnd-row">
+        <span class="lbl-inline">Caractéristiques</span>
+        <div class="seg">
+          <button data-a="rnd-stats" data-v="player" class="${w.rnd.stats === 'player' ? 'active' : ''}">🎲 Je lance les dés moi-même</button>
+          <button data-a="rnd-stats" data-v="auto" class="${w.rnd.stats === 'auto' ? 'active' : ''}">Automatiques</button>
+        </div>
+      </div>
       ${mode === 'quiz' ? quizPanel() : `<p class="small muted">${mode === 'free'
-        ? 'Vrai hasard, sans aucune contrainte : classe, espèce et historique parmi tous les livres, caractéristiques tirées aux dés (4d6, on garde les 3 meilleurs) et placées au hasard. Le résultat peut être surprenant !'
-        : 'Au hasard, mais en respectant tes conditions, et avec un personnage cohérent : caractéristiques du tableau standard placées selon la classe, bonus d’historique sur les bonnes caractéristiques.'}</p>
+        ? `Vrai hasard, sans aucune contrainte : classe, espèce et historique parmi tous les livres. ${w.rnd.stats === 'player' ? 'Tu lanceras ensuite toi-même tes caractéristiques (4d6, on garde les 3 meilleurs).' : 'Caractéristiques tirées aux dés (4d6, on garde les 3 meilleurs) et placées au hasard.'} Le résultat peut être surprenant !`
+        : `Au hasard, mais en respectant tes conditions, avec un personnage cohérent (bonus d’historique sur les bonnes caractéristiques). ${w.rnd.stats === 'player' ? 'Tu lanceras ensuite toi-même tes caractéristiques.' : 'Caractéristiques : tableau standard placé selon la classe.'}`}</p>
       ${mode === 'cond' ? `<div class="rnd-row">
         <span class="lbl-inline">Magie</span>
         <div class="seg">${MAGIC_OPTIONS.map(([v, l, t]) => `<button data-a="rnd-magic" data-v="${v}" class="${magic === v ? 'active' : ''}" title="${esc(t)}">${l}</button>`).join('')}</div>
@@ -1967,6 +2167,10 @@ function wizardView() {
       <div class="page-head"><h1>Nouveau personnage</h1>
         <button class="btn ${w.rnd.open ? 'primary' : ''}" data-a="rnd-toggle" aria-expanded="${w.rnd.open}">🎲 Personnage aléatoire</button></div>
       ${w.rnd.open ? randomPanel() : ''}
+      ${w.rolled && w.step === 3 && w.method === 'dice' && !diceComplete() ? `<div class="notice wide rnd-done">🎲 ${w.quizResult
+        ? `D'après tes réponses, tu es <b>${esc(cls()?.name ?? '')} ${esc(R.speciesName({ speciesId: w.speciesId }) ?? '')}</b> ! ${esc(w.quizResult.reveal)} `
+        : `Tirage fait : <b>${esc(cls()?.name ?? '')} ${esc(R.speciesName({ speciesId: w.speciesId }) ?? '')}</b>, ${esc(bg()?.name ?? '')}. `}
+        À toi de lancer les dés pour tes caractéristiques, puis de les placer.</div>` : ''}
       ${w.rolled && w.step === STEPS.length - 1 && w.quizResult ? `<div class="card quiz-result">
         <p class="small muted">✨ D'après tes réponses, tu es…</p>
         <h2>${esc(cls()?.name ?? '')} ${esc(R.speciesName({ speciesId: w.speciesId }) ?? '')}${w.subclass ? ` <small>(${esc(subclassName(cls(), w.subclass))})</small>` : ''}</h2>
@@ -1979,7 +2183,7 @@ function wizardView() {
         </div>
       </div>` : ''}
       ${w.rolled && w.step === STEPS.length - 1 && !w.quizResult ? `<div class="notice wide rnd-done">🎲 Personnage tiré au sort ! Vérifie le récapitulatif : tu peux tout modifier en cliquant sur les étapes ci-dessous,
-        changer le nom, ou <button class="link" data-a="rnd-go">relancer les dés</button>.</div>` : ''}
+        changer le nom, ou <button class="link" data-a="rnd-go">refaire un tirage</button>.</div>` : ''}
       <div class="wizard-top">
         ${stepperBar()}
         <div class="row">
@@ -2033,6 +2237,7 @@ function wizardView() {
     if (act === 'rnd-toggle') w.rnd.open = !w.rnd.open;
     if (act === 'rnd-mode') w.rnd.mode = v;
     if (act === 'rnd-magic') w.rnd.magic = v;
+    if (act === 'rnd-stats') w.rnd.stats = v;
     if (act === 'quiz-start') Object.assign(w.quiz, { started: true, i: 0, answers: [] });
     if (act === 'quiz-back') { if (w.quiz.i) w.quiz.i--; else w.quiz.started = false; }
     if (act === 'quiz-ans') {
@@ -2041,17 +2246,18 @@ function wizardView() {
       else if (randomize(quizProfile(w.quiz.answers))) {
         Object.assign(w.rnd, { open: false });
         w.quiz.started = false;
-        goTo(STEPS.length - 1);
+        goTo(afterRandom());
       } else toast('Impossible de créer un personnage avec ces réponses : réessaie.', 'error');
     }
-    if (act === 'quiz-other' && randomize(quizProfile(w.quiz.answers), true)) goTo(STEPS.length - 1);
+    if (act === 'quiz-other' && randomize(quizProfile(w.quiz.answers), true)) goTo(afterRandom());
     if (act === 'quiz-restart') { Object.assign(w.quiz, { started: true, i: 0, answers: [] }); w.rnd.open = true; w.rnd.mode = 'quiz'; }
     if (act === 'rnd-go') {
-      if (randomize()) { w.rnd.open = false; goTo(STEPS.length - 1); }
+      if (randomize()) { w.rnd.open = false; goTo(afterRandom()); }
       else toast('Aucun personnage ne correspond à ces conditions : essaie « Peu importe ».', 'error');
     }
     if (act === 'method') {
       w.method = v;
+      if (v === 'dice') applyDice();
       if (v === 'standard') suggestStandard();
       if (v === 'pointbuy') ABILITIES.forEach(x => (w.base[x.id] = 8));
     }
@@ -2065,11 +2271,19 @@ function wizardView() {
       const nv = w.base[k] + Number(v);
       if (nv >= 8 && nv <= 15) w.base[k] = nv;
     }
-    if (act === 'roll') {
-      ABILITIES.forEach(x => {
-        const d = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => (n % 6) + 1).sort((p, q) => q - p);
-        w.base[x.id] = d[0] + d[1] + d[2];
-      });
+    if (act === 'dice-one' && w.diceRolls.length < 6) rollStat();
+    if (act === 'dice-all') while (w.diceRolls.length < 6) rollStat();
+    if (act === 'dice-reset') {
+      if (!confirm('Relancer les 6 caractéristiques ? Les résultats actuels seront perdus.')) return;
+      w.diceRolls = [];
+      w.diceAssign = {};
+      applyDice();
+    }
+    if (act === 'dice-best') {
+      const byValue = w.diceRolls.map((r, i) => i).sort((x, y) => w.diceRolls[y].total - w.diceRolls[x].total);
+      w.diceAssign = {};
+      order().forEach((ab, k) => (w.diceAssign[ab] = byValue[k]));
+      assignDice(order()[0], w.diceAssign[order()[0]]);
     }
     if (act === 'create') {
       if (!valid()) return;
@@ -2098,6 +2312,8 @@ function wizardView() {
       const other = ABILITIES.find(x => x.id !== ab && w.base[x.id] === nv);
       if (other) w.base[other.id] = w.base[ab];
       w.base[ab] = nv;
+    } else if (t.dataset.diceAssign) {
+      assignDice(t.dataset.diceAssign, t.value === '' ? undefined : Number(t.value));
     } else if (t.dataset.man) {
       w.base[t.dataset.man] = Math.min(20, Math.max(3, Number(t.value) || 10));
     } else if (t.dataset.bg) {
@@ -2325,7 +2541,7 @@ function sheetView(id) {
     return `<div class="top-stats">
       <div class="stat card"><span class="lbl">Classe d'armure ${infoBtn('stat:ac')}</span>${inp('ac', { type: 'number', cls: 'big' })}
         ${canEdit ? `<button class="hint" data-a="ac-sug" title="Sans armure">suggestion : <b data-d="ac-sug"></b></button>` : ''}</div>
-      <div class="stat card"><span class="lbl">Initiative ${infoBtn('stat:init')}</span><b class="big" data-d="init"></b>
+      <div class="stat card"><span class="lbl">Initiative ${infoBtn('stat:init')}</span><button class="big roll" data-roll="init" data-d="init" title="Lancer l'initiative"></button>
         ${canEdit ? `<label class="hint">divers ${inp('initMisc', { type: 'number', cls: 'tiny' })}</label>` : ''}</div>
       <div class="stat card"><span class="lbl">Vitesse (m) ${infoBtn('stat:speed')}</span>${inp('speed', { type: 'number', cls: 'big', attrs: 'step="1.5" min="0"' })}</div>
       <div class="stat card"><span class="lbl">Bonus de maîtrise ${infoBtn('stat:prof')}</span><b class="big" data-d="prof"></b></div>
@@ -2345,10 +2561,11 @@ function sheetView(id) {
         const bonusTxt = [c.bgBonus?.[a.id] ? `historique +${c.bgBonus[a.id]}` : '', c.otherBonus?.[a.id] ? `autres ${R.fmt(c.otherBonus[a.id])}` : ''].filter(Boolean).join(', ');
         return `<div class="ability">
           <span class="lbl" title="${a.name}">${a.short} ${infoBtn(`ability:${a.id}`, a.name)}</span>
-          <b class="mod" data-d="mod-${a.id}"></b>
+          <button class="mod roll" data-roll="check:${a.id}" data-d="mod-${a.id}" title="Test de ${a.name}"></button>
           <input type="number" class="score" data-score="${a.id}" value="${R.score(c, a.id)}" min="1" max="30" ${dis()} title="${esc(bonusTxt || a.name)}">
           <button class="save ${prof ? 'on' : ''}" data-a="save" data-k="${a.id}" ${classSave || !canEdit ? 'disabled' : ''} title="Jet de sauvegarde${classSave ? ' (classe)' : ''}">
             <i></i>JS <span data-d="save-${a.id}"></span></button>
+          <button class="roll-mini" data-roll="save:${a.id}" title="Jet de sauvegarde de ${a.name}">🎲 JS</button>
         </div>`;
       }).join('')}</div>
     </section>`;
@@ -2360,7 +2577,7 @@ function sheetView(id) {
       <ul class="skills">${SKILLS.map(s => {
         const lvl = c.skills?.[s.id] ?? 0;
         return `<li><button class="prof p${lvl}" data-a="skill" data-k="${s.id}" ${dis()} title="${['Non maîtrisée', 'Maîtrise', 'Expertise'][lvl]}"></button>
-          <span class="sk-bonus" data-d="skill-${s.id}"></span>
+          <button class="sk-bonus roll" data-roll="skill:${s.id}" data-d="skill-${s.id}" title="Lancer ${s.name}"></button>
           <span>${s.name}</span> ${infoBtn(`skill:${s.id}`, s.name)}<small class="muted">${R.abilityShort(s.ab)}</small></li>`;
       }).join('')}</ul>
     </section>`;
@@ -2384,9 +2601,11 @@ function sheetView(id) {
       </div>` : ''}
       <div class="row spread">
         <div><span class="lbl">Dés de vie ${infoBtn('stat:hitdice')}</span> <b data-d="hd"></b>
+          <button class="roll-mini" data-roll="hd" title="Lancer un dé de vie (+ modificateur de Constitution)">🎲</button>
           ${canEdit ? `<label class="hint">utilisés ${inp('hitDiceUsed', { type: 'number', cls: 'tiny', attrs: 'min="0"' })}</label>` : ''}</div>
         <div class="death">
           <span class="lbl">Jets contre la mort ${infoBtn('stat:death')}</span>
+          <button class="roll-mini" data-roll="death" title="Lancer un jet contre la mort (d20)">🎲 d20</button>
           <div>✓ ${pips(3, ds.success, 'death', 'data-k="success"')}</div>
           <div>✗ ${pips(3, ds.fail, 'death', 'data-k="fail"')}</div>
         </div>
@@ -2405,10 +2624,11 @@ function sheetView(id) {
     const list = c.attacks ?? [];
     return `<section class="card">
       <h2>Attaques ${infoBtn('stat:attacks')}</h2>
-      ${list.length ? `<table class="list-table"><thead><tr><th>Nom</th><th>Bonus</th><th>Dégâts / type</th><th>Notes</th>${canEdit ? '<th></th>' : ''}</tr></thead>
+      ${list.length ? `<table class="list-table"><thead><tr><th>Nom</th><th>Bonus</th><th>Dégâts / type</th><th>Notes</th><th class="w-roll">Lancer</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${list.map((_, i) => `<tr>
           <td>${inp(`attacks.${i}.name`)}</td><td>${inp(`attacks.${i}.bonus`, { cls: 'tiny' })}</td>
           <td>${inp(`attacks.${i}.damage`)}</td><td>${inp(`attacks.${i}.notes`)}</td>
+          <td class="nowrap"><button class="roll-mini" data-roll="atk:${i}" title="Jet d'attaque">🎯</button><button class="roll-mini" data-roll="dmg:${i}" title="Dégâts">💥</button></td>
           ${canEdit ? `<td><button class="icon" data-a="del" data-k="attacks" data-n="${i}" title="Supprimer">✕</button></td>` : ''}
         </tr>`).join('')}</tbody></table>` : '<p class="muted small">Aucune attaque.</p>'}
       ${canEdit ? '<button class="btn ghost small" data-a="add" data-k="attacks">+ Ajouter une attaque</button>' : ''}
@@ -2494,7 +2714,7 @@ function sheetView(id) {
           ${sel('spellAb', ABILITIES.map(a => [a.id, a.name]), { rerender: true, emptyLabel: 'Selon la classe' })}
           <span class="hint">${cls?.spellAb ? `classe : ${byId(ABILITIES, cls.spellAb).name}` : 'classe non lanceuse'}</span></div>
         <div class="stat card"><span class="lbl">DD de sauvegarde ${infoBtn('stat:spells')}</span><b class="big" data-d="dc"></b></div>
-        <div class="stat card"><span class="lbl">Bonus d'attaque</span><b class="big" data-d="atk"></b></div>
+        <div class="stat card"><span class="lbl">Bonus d'attaque</span><button class="big roll" data-roll="spellatk" data-d="atk" title="Lancer une attaque de sort"></button></div>
       </div>
       <section class="card">
         <h2>Emplacements de sorts ${cls?.caster === 'pact' ? '<small class="muted">(magie de pacte : récupérés après un repos court)</small>' : ''}</h2>
@@ -2539,6 +2759,8 @@ function sheetView(id) {
         ${lvl === 0 ? '<span class="sp-prep always" title="Les sorts mineurs sont toujours prêts">∞</span>'
           : `<label class="sp-prep" title="Sort préparé"><input type="checkbox" data-p="spells.${s.i}.prepared" data-t="bool" data-r ${s.prepared ? 'checked' : ''} ${dis()}><span class="sr">Préparé</span></label>`}
         <button class="spell-head" data-a="spell-toggle" data-n="${s.i}" aria-expanded="${open}" data-spell-sum="${s.i}">${spellSummary(c, s)}</button>
+        ${s.roll === 'attack' ? '<button class="roll-mini" data-roll="spellatk" title="Attaque de sort">🎯</button>' : ''}
+        ${findDice(s.effect) ? `<button class="roll-mini" data-roll="spelldmg:${s.i}" title="Lancer ${esc(findDice(s.effect))}">💥</button>` : ''}
         <button class="icon sp-caret" data-a="spell-toggle" data-n="${s.i}" title="${open ? 'Replier' : canEdit ? 'Détails et modification' : 'Détails'}" aria-hidden="true">${open ? '▴' : '▾'}</button>
       </div>
       ${open ? `<div class="spell-body">
@@ -2648,7 +2870,48 @@ function sheetView(id) {
     save(200);
   });
 
+  // Jets de dés depuis la fiche (tout le monde peut lancer, même sans pouvoir modifier).
+  const d20 = n => (n ? `1d20${n > 0 ? '+' : ''}${n}` : '1d20');
+  function sheetRoll(key) {
+    const [kind, arg] = key.split(':');
+    const who = c.name || 'Personnage';
+    const ab = id => byId(ABILITIES, id)?.name ?? id;
+    const i = Number(arg);
+    switch (kind) {
+      case 'check': return doRoll(d20(R.abilityMod(c, arg)), `${who} · Test de ${ab(arg)}`);
+      case 'save': return doRoll(d20(R.saveBonus(c, arg)), `${who} · Sauvegarde de ${ab(arg)}`);
+      case 'skill': return doRoll(d20(R.skillBonus(c, arg)), `${who} · ${byId(SKILLS, arg)?.name}`);
+      case 'init': return doRoll(d20(R.initiative(c)), `${who} · Initiative`);
+      case 'spellatk': {
+        const sp = R.spellInfo(c);
+        if (!sp) return toast('Choisis d’abord la caractéristique de lanceur de sorts (onglet Sorts).', 'error');
+        return doRoll(d20(sp.attack), `${who} · Attaque de sort`);
+      }
+      case 'spelldmg': {
+        const sp = c.spells?.[i];
+        return doRoll(findDice(sp?.effect), `${who} · ${sp?.name || 'Sort'}`);
+      }
+      case 'hd': {
+        const con = R.abilityMod(c, 'con');
+        return doRoll(`1d${R.classOf(c)?.hd ?? 8}${con ? `${con > 0 ? '+' : ''}${con}` : ''}`, `${who} · Dé de vie`);
+      }
+      case 'death': return doRoll('1d20', `${who} · Jet contre la mort`, 'normal');
+      case 'atk': {
+        const at = c.attacks?.[i];
+        return doRoll(d20(parseInt(String(at?.bonus ?? '').replace(/\s/g, ''), 10) || 0), `${who} · Attaque${at?.name ? ` : ${at.name}` : ''}`);
+      }
+      case 'dmg': {
+        const at = c.attacks?.[i];
+        const expr = findDice(at?.damage);
+        if (!expr) return toast('Indique les dégâts sous la forme « 1d8+3 » pour pouvoir les lancer.', 'error');
+        return doRoll(expr, `${who} · Dégâts${at?.name ? ` : ${at.name}` : ''}`, 'normal');
+      }
+    }
+  }
+
   root.addEventListener('click', async e => {
+    const rb = e.target.closest('[data-roll]');
+    if (rb && c) { sheetRoll(rb.dataset.roll); return; }
     const a = e.target.closest('[data-a]');
     if (!a || !c) return;
     const { a: act, k } = a.dataset;
