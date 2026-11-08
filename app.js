@@ -1,13 +1,13 @@
-import * as store from './store.js?v=202611011726';
+import * as store from './store.js?v=202611081402';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202611011726';
-import * as R from './rules.js?v=202611011726';
+} from './data.js?v=202611081402';
+import * as R from './rules.js?v=202611081402';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202611011726';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611011726';
+} from './info.js?v=202611081402';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611081402';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -1284,6 +1284,60 @@ const PRIORITY = {
   wizard: ['int', 'con', 'dex', 'wis', 'cha', 'str'],
 };
 
+// ── Personnage aléatoire ────────────────────────────────────
+
+const roll = n => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+const pickOne = list => list[roll(list.length)];
+const shuffle = list => {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) { const j = roll(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+};
+
+// Magie « un peu » : semi-lanceurs, ou guerrier / roublard avec une sous-classe magique.
+const MAGIC_SUBCLASSES = { fighter: ['Chevalier occulte', 'Archer arcanique'], rogue: ['Escroc arcanique'] };
+// Espèces et historiques qui donnent des sorts : écartés quand on ne veut aucune magie.
+const MAGIC_SPECIES = ['aasimar', 'elf', 'gnome', 'tiefling'];
+const MAGIC_FEATS = ['mi-cleric', 'mi-druid', 'mi-wizard'];
+const MAGIC_OPTIONS = [
+  ['any', 'Peu importe', ''],
+  ['yes', 'Oui', 'Un vrai lanceur de sorts : barde, clerc, druide, ensorceleur, magicien, occultiste…'],
+  ['some', 'Un peu', 'Un combattant avec un peu de magie : paladin, rôdeur, artificier, ou guerrier / roublard à sous-classe magique.'],
+  ['no', 'Non', 'Aucune magie : ni classe, ni sous-classe, ni espèce, ni historique qui donne des sorts.'],
+];
+const EPIC_BOONS = ['Faveur de prouesse au combat', 'Faveur de voyage dimensionnel', 'Faveur du destin', 'Faveur de robustesse',
+  "Faveur d'attaque irrésistible", 'Faveur de récupération', 'Faveur de talent', 'Faveur de vitesse', 'Faveur de vision véritable'];
+
+const NAME_PARTS = [
+  ['Al', 'Bran', 'Cae', 'Dor', 'El', 'Fen', 'Gal', 'Hal', 'Is', 'Kael', 'Lir', 'Mor', 'Nym', 'Or', 'Pel', 'Ryn', 'Sel', 'Tor', 'Ul', 'Val', 'Wyn', 'Zar', 'Thal', 'Ara', 'Bel', 'Cor', 'Dra', 'Eir', 'Gwen', 'Iv'],
+  ['', '', 'a', 'e', 'i', 'o', 'ae', 'ia', 'or', 'an', 'el'],
+  ['dor', 'wen', 'ric', 'las', 'mir', 'nor', 'thas', 'wyn', 'ra', 'iel', 'gar', 'dris', 'beth', 'mond', 'ys', 'vin', 'ka', 'rion', 'th', 'na'],
+];
+const EPITHETS = ['Lame-d’Aube', 'du Nord', 'Main-de-Fer', 'Cœur-Vaillant', 'des Brumes', 'Œil-de-Faucon', 'Pied-Léger', 'du Val Gris', 'Langue-d’Argent', 'Sang-Froid'];
+const randomName = () => {
+  const n = NAME_PARTS.map(pickOne).join('');
+  const name = n.charAt(0).toUpperCase() + n.slice(1);
+  return roll(3) ? name : `${name} ${pickOne(EPITHETS)}`;
+};
+const TRAITS = ['Curiosité insatiable : pose sans cesse des questions', 'Parle peu mais observe tout', 'Toujours une blague à la bouche, même au pire moment',
+  'Méfiance envers les inconnus', 'Générosité jusqu’à l’imprudence', 'Collectionne des babioles sans valeur', 'Ne recule jamais devant un défi',
+  'Calme en toutes circonstances', 'Chante faux, et souvent', 'Range tout de manière obsessionnelle'];
+const IDEALS = ['Liberté', 'Honneur', 'Connaissance', 'Famille', 'Pouvoir', 'Rédemption', 'Justice', 'Aventure', 'Foi', 'Richesse'];
+const FLAWS = ['Ne sait pas garder un secret', 'Ne résiste jamais à un pari', 'Rancune tenace', 'Confiance excessive en ses capacités',
+  'Peur panique du noir', 'Ne supporte pas l’autorité', 'Gourmandise sans limite', 'Ment par habitude'];
+const HOOKS = ['Recherche un proche disparu depuis des années.', 'Doit une grosse somme à une guilde peu recommandable.',
+  'Seule personne rescapée de son village, détruit une nuit d’hiver.', 'A reçu une carte mystérieuse des mains d’un inconnu mourant.',
+  'Fuit une prophétie à son sujet.', 'Veut prouver sa valeur à son ancien mentor.', 'A juré de protéger un objet dont la nature lui échappe.',
+  'Cherche à réparer une erreur de jeunesse.', 'A été banni de sa cité pour un crime commis par quelqu’un d’autre.'];
+
+// Ordre conseillé des caractéristiques d'une classe (classes d'extension comprises).
+function classPriority(c) {
+  if (PRIORITY[c?.id]) return PRIORITY[c.id];
+  const short = Object.fromEntries(ABILITIES.map(a => [a.short.toUpperCase(), a.id]));
+  const prim = String(c?.primary ?? '').toUpperCase().match(/[A-ZÉ]{3}/g)?.map(x => short[x]).filter(Boolean) ?? [];
+  return [...new Set([...prim, c?.spellAb, 'con', ...(c?.saves ?? []), ...ABILITIES.map(a => a.id)].filter(Boolean))];
+}
+
 const STEPS = ['Classe', 'Espèce', 'Historique', 'Caractéristiques', 'Compétences', 'Niveau', 'Finalisation'];
 const SEARCH_PLACEHOLDER = {
   0: 'Rechercher une classe…', 1: 'Rechercher une espèce…', 2: 'Rechercher un historique, un don…', 5: 'Rechercher une sous-classe…',
@@ -1298,13 +1352,14 @@ function wizardView() {
     name: '', level: 1, alignment: '', portrait: '', personality: '', backstory: '',
     customClassName: '', customSpeciesName: '', source: 'all',
     subclass: '', levelChoices: [], search: '',
+    rnd: { open: false, mode: 'cond', magic: 'any' }, rolled: false,
   };
   const root = mount('');
 
   const cls = () => byId(CLASSES, w.classId);
   const sp = () => byId(SPECIES, w.speciesId);
   const bg = () => byId(BACKGROUNDS, w.backgroundId);
-  const order = () => PRIORITY[w.classId] ?? ABILITIES.map(a => a.id);
+  const order = () => classPriority(cls());
 
   const suggestStandard = () => order().forEach((ab, i) => (w.base[ab] = STANDARD_ARRAY[i]));
   const defaultBgPicks = () => {
@@ -1342,6 +1397,98 @@ function wizardView() {
   const choicesValid = () => w.levelChoices.every(ch =>
     ch.kind === 'asi' ? !!ch.a && (ch.mode === '2' || (!!ch.b && ch.b !== ch.a)) : !!ch.feat?.trim())
     && Object.values(totals()).every(v => v <= 20);
+
+  // Tirage au sort complet. « free » : tout au hasard, caractéristiques aux dés.
+  // « cond » : au hasard dans les conditions choisies, avec un personnage cohérent (caractéristiques selon la classe).
+  function randomize() {
+    const { mode, magic } = w.rnd;
+    const free = mode === 'free';
+    const lvl = w.level;
+    const magicSubs = c => MAGIC_SUBCLASSES[c.id] ?? [];
+    let classes = CLASSES.filter(c => c.id !== 'custom' && c.skills?.length && (free || !c.verify));
+    if (!free && magic === 'yes') classes = classes.filter(c => c.caster === 'full' || c.caster === 'pact');
+    if (!free && magic === 'some') classes = classes.filter(c => c.caster === 'half' || c.caster === 'third'
+      || (lvl >= SUBCLASS_LEVEL && magicSubs(c).some(n => c.subclasses.includes(n))));
+    if (!free && magic === 'no') classes = classes.filter(c => !c.caster && !c.spellAb);
+    let species = SPECIES.filter(x => x.id !== 'custom');
+    let backgrounds = BACKGROUNDS;
+    if (!free && magic === 'no') {
+      species = species.filter(x => !MAGIC_SPECIES.includes(x.id));
+      backgrounds = backgrounds.filter(b => !MAGIC_FEATS.includes(b.feat));
+    }
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const c = pickOne(classes);
+      Object.assign(w, {
+        classId: c.id, customClassName: '', speciesId: pickOne(species).id, customSpeciesName: '',
+        backgroundId: pickOne(backgrounds).id, lineage: '', keenSense: '', skillful: '', levelChoices: [], subclass: '',
+      });
+      const s = sp();
+      if (s.lineages) w.lineage = pickOne(s.lineages);
+
+      // Sous-classe
+      if (needsSubclass()) {
+        let subs = c.subclasses;
+        if (!free && magic === 'some' && !c.caster) subs = subs.filter(n => magicSubs(c).includes(n));
+        if (!free && magic === 'no') subs = subs.filter(n => !magicSubs(c).includes(n));
+        if (!subs.length) continue;
+        w.subclass = pickOne(subs);
+      }
+
+      // Caractéristiques et bonus d'historique
+      if (free) {
+        w.method = 'manual';
+        ABILITIES.forEach(a => {
+          const d = Array.from({ length: 4 }, () => roll(6) + 1).sort((x, y) => y - x);
+          w.base[a.id] = d[0] + d[1] + d[2];
+        });
+        w.bgMode = pickOne(['21', '111']);
+        w.bgPicks = w.bgMode === '21' ? shuffle(bg().abilities).slice(0, 2) : [...bg().abilities];
+      } else {
+        w.method = 'standard';
+        suggestStandard();
+        w.bgMode = '21';
+        defaultBgPicks();
+      }
+
+      // Améliorations de caractéristiques (sans dépasser 20) et don épique
+      // Totaux avant les améliorations (base + historique), puis répartition des améliorations.
+      w.levelChoices = [];
+      const t = { ...totals() };
+      syncChoices();
+      w.levelChoices.forEach(ch => {
+        if (ch.kind === 'boon') { ch.feat = pickOne(EPIC_BOONS); return; }
+        const ranked = free ? shuffle(ABILITIES.map(a => a.id)) : order();
+        const room = n => ranked.find(ab => t[ab] + n <= 20);
+        ch.kind = 'asi';
+        // Hasard : +2 ou +1/+1 au hasard. Cohérent : on monte la meilleure caractéristique jusqu'à 20.
+        ch.mode = free ? pickOne(['2', '11']) : room(1) && t[room(1)] + 2 <= 20 ? '2' : '11';
+        if (ch.mode === '2' && !room(2)) ch.mode = '11';
+        ch.a = ch.mode === '2' ? room(2) : room(1);
+        ch.b = ch.mode === '11' ? ranked.find(ab => ab !== ch.a && t[ab] + 1 <= 20) : ch.a;
+        if (ch.mode === '2') t[ch.a] += 2; else { t[ch.a] += 1; if (ch.b) t[ch.b] += 1; }
+      });
+
+      // Compétences
+      const owned = ownedSkills();
+      w.classSkills = shuffle(c.skills.filter(x => !owned.has(x))).slice(0, c.skillCount);
+      if (s.keenSenses) w.keenSense = pickOne(s.keenSenses.filter(x => !owned.has(x) && !w.classSkills.includes(x))) ?? '';
+      if (s.skillful) w.skillful = pickOne(SKILLS.map(x => x.id).filter(x => !owned.has(x) && !w.classSkills.includes(x)));
+
+      // Identité
+      w.name = randomName();
+      w.alignment = pickOne(ALIGNMENTS);
+      w.personality = `Trait : ${pickOne(TRAITS)}.\nIdéal : ${pickOne(IDEALS)}.\nDéfaut : ${pickOne(FLAWS)}.`;
+      w.backstory = pickOne(HOOKS);
+
+      if ([0, 1, 2, 3, 4, 5, 6].every(i => valid(i))) {
+        w.rolled = true;
+        w.source = 'all';
+        return true;
+      }
+    }
+    return false;
+  }
 
   function valid(step = w.step) {
     switch (step) {
@@ -1597,9 +1744,37 @@ function wizardView() {
       </div>`,
   ];
 
+  function randomPanel() {
+    const { mode, magic } = w.rnd;
+    return `<section class="card rnd-panel">
+      <h2>Pas d'idée ? Laisse les dés décider</h2>
+      <div class="rnd-row">
+        <span class="lbl-inline">Type de tirage</span>
+        <div class="seg">
+          <button data-a="rnd-mode" data-v="free" class="${mode === 'free' ? 'active' : ''}">Totalement aléatoire</button>
+          <button data-a="rnd-mode" data-v="cond" class="${mode === 'cond' ? 'active' : ''}">Avec conditions</button>
+        </div>
+      </div>
+      <p class="small muted">${mode === 'free'
+        ? 'Vrai hasard, sans aucune contrainte : classe, espèce et historique parmi tous les livres, caractéristiques tirées aux dés (4d6, on garde les 3 meilleurs) et placées au hasard. Le résultat peut être surprenant !'
+        : 'Au hasard, mais en respectant tes conditions, et avec un personnage cohérent : caractéristiques du tableau standard placées selon la classe, bonus d’historique sur les bonnes caractéristiques.'}</p>
+      ${mode === 'cond' ? `<div class="rnd-row">
+        <span class="lbl-inline">Magie</span>
+        <div class="seg">${MAGIC_OPTIONS.map(([v, l, t]) => `<button data-a="rnd-magic" data-v="${v}" class="${magic === v ? 'active' : ''}" title="${esc(t)}">${l}</button>`).join('')}</div>
+      </div>
+      ${MAGIC_OPTIONS.find(([v]) => v === magic)[2] ? `<p class="small muted">${esc(MAGIC_OPTIONS.find(([v]) => v === magic)[2])}</p>` : ''}` : ''}
+      <p class="small muted">Niveau ${w.level} (fixé par le MJ). Nom, alignement, trait de personnalité et accroche d'histoire sont aussi tirés au sort.</p>
+      <button class="btn primary" data-a="rnd-go">🎲 Tirer au sort</button>
+    </section>`;
+  }
+
   function render() {
     root.innerHTML = `
-      <div class="page-head"><h1>Nouveau personnage</h1></div>
+      <div class="page-head"><h1>Nouveau personnage</h1>
+        <button class="btn ${w.rnd.open ? 'primary' : ''}" data-a="rnd-toggle" aria-expanded="${w.rnd.open}">🎲 Personnage aléatoire</button></div>
+      ${w.rnd.open ? randomPanel() : ''}
+      ${w.rolled && w.step === STEPS.length - 1 ? `<div class="notice wide rnd-done">🎲 Personnage tiré au sort ! Vérifie le récapitulatif : tu peux tout modifier en cliquant sur les étapes ci-dessous,
+        changer le nom, ou <button class="link" data-a="rnd-go">relancer les dés</button>.</div>` : ''}
       <div class="wizard-top">
         ${stepperBar()}
         <div class="row">
@@ -1629,6 +1804,7 @@ function wizardView() {
       const { pick: field, val } = pick.dataset;
       if (w[field] !== val) {
         w[field] = val;
+        w.rolled = false;
         if (field === 'classId') {
           w.classSkills = [];
           w.subclass = '';
@@ -1649,6 +1825,13 @@ function wizardView() {
     if (act === 'goto' && reachable(Number(v))) goTo(Number(v));
     if (act === 'prev') { w.step--; w.search = ''; window.scrollTo(0, 0); }
     if (act === 'bgmode') { w.bgMode = v; defaultBgPicks(); }
+    if (act === 'rnd-toggle') w.rnd.open = !w.rnd.open;
+    if (act === 'rnd-mode') w.rnd.mode = v;
+    if (act === 'rnd-magic') w.rnd.magic = v;
+    if (act === 'rnd-go') {
+      if (randomize()) { w.rnd.open = false; goTo(STEPS.length - 1); }
+      else toast('Aucun personnage ne correspond à ces conditions : essaie « Peu importe ».', 'error');
+    }
     if (act === 'method') {
       w.method = v;
       if (v === 'standard') suggestStandard();

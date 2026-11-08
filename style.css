@@ -523,3 +523,12 @@ input.search { width: 240px; max-width: 100%; padding-left: 30px;
 @media (max-width: 600px) { .sp-fields label.span2 { grid-column: 1 / -1; } }
 .spell-group { margin-bottom: 6px; }
 .add-spell { margin: 2px 0 4px; }
+
+/* Personnage aléatoire */
+.rnd-panel { margin-bottom: 14px; border-color: var(--magic); }
+.rnd-panel h2 { margin-top: 0; }
+.rnd-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 4px; }
+.rnd-row .seg { margin: 0; flex-wrap: wrap; }
+.rnd-row .lbl-inline { font-weight: 600; min-width: 110px; }
+.rnd-done { margin-bottom: 12px; }
+.rnd-done .link { display: inline; padding: 0; font-weight: 600; }
