@@ -1,13 +1,13 @@
-import * as store from './store.js?v=202611081402';
+import * as store from './store.js?v=202611081411';
 import {
   ABILITIES, SKILLS, CLASSES, SPECIES, BACKGROUNDS, ALIGNMENTS, CONDITIONS, FEATS,
   STANDARD_ARRAY, POINT_BUY_COST, POINT_BUY_BUDGET, SOURCES, LIB_INFO, applyLibrary, subclassName, byId,
-} from './data.js?v=202611081402';
-import * as R from './rules.js?v=202611081402';
+} from './data.js?v=202611081411';
+import * as R from './rules.js?v=202611081411';
 import {
   ABILITY_INFO, SKILL_INFO, STAT_INFO, CONDITION_INFO, FEAT_INFO, CLASS_FEATURE_INFO, SPECIES_INFO,
-} from './info.js?v=202611081402';
-import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611081402';
+} from './info.js?v=202611081411';
+import { featuresUpTo, scalingValues, asiLevels, EPIC_BOON_LEVEL, SUBCLASS_LEVEL } from './progression.js?v=202611081411';
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -1330,6 +1330,162 @@ const HOOKS = ['Recherche un proche disparu depuis des années.', 'Doit une gros
   'Fuit une prophétie à son sujet.', 'Veut prouver sa valeur à son ancien mentor.', 'A juré de protéger un objet dont la nature lui échappe.',
   'Cherche à réparer une erreur de jeunesse.', 'A été banni de sa cité pour un crime commis par quelqu’un d’autre.'];
 
+// ── Questionnaire de personnalité ───────────────────────────
+// Chaque réponse donne des points à des classes (c), espèces (s) et historiques (b),
+// déplace l'alignement (law : loyal +, chaotique − ; good : bon +, mauvais −)
+// et peut fournir un trait, un idéal, un défaut ou une accroche d'histoire.
+const QUIZ = [
+  {
+    q: 'Un incendie ravage la taverne où tu dînes. Ton premier réflexe ?',
+    a: [
+      { t: 'Foncer dans les flammes pour sortir les gens.', c: { paladin: 2, fighter: 1, barbarian: 1, cleric: 1 }, good: 2, trait: 'Se jette au secours des autres sans réfléchir' },
+      { t: 'Organiser la chaîne de seaux et donner des ordres.', c: { fighter: 2, paladin: 1, bard: 1 }, b: { soldier: 2, noble: 2, guard: 1 }, law: 1, trait: 'Prend naturellement les commandes dans le chaos' },
+      { t: 'Profiter de la confusion pour vider la caisse.', c: { rogue: 3, warlock: 1 }, b: { criminal: 3, charlatan: 2 }, law: -2, good: -1, trait: 'Voit une occasion là où les autres voient un drame' },
+      { t: 'Chercher d’où vient le feu : il n’a rien de naturel.', c: { wizard: 2, druid: 1, ranger: 1 }, b: { sage: 2, scribe: 2 }, trait: 'Veut toujours comprendre le pourquoi des choses' },
+    ],
+  },
+  {
+    q: 'Ton jour de repos idéal ?',
+    a: [
+      { t: 'Une longue marche en forêt, loin de tout.', c: { ranger: 2, druid: 2 }, b: { guide: 3, hermit: 2, farmer: 1 }, s: { elf: 1, halfling: 1 } },
+      { t: 'Une bibliothèque, une tisane, et des heures de lecture.', c: { wizard: 3, cleric: 1 }, b: { sage: 3, scribe: 2 }, s: { gnome: 1, elf: 1 } },
+      { t: 'Une fête qui dure jusqu’à l’aube.', c: { bard: 3, sorcerer: 1, warlock: 1 }, b: { entertainer: 3, merchant: 1 }, s: { human: 1, tiefling: 1, halfling: 1 }, law: -1 },
+      { t: 'M’entraîner jusqu’à l’épuisement.', c: { fighter: 2, monk: 2, barbarian: 1 }, b: { soldier: 2, sailor: 1 }, s: { goliath: 1, orc: 1, dwarf: 1 } },
+    ],
+  },
+  {
+    q: 'Quel mot te ressemble le plus ?',
+    a: [
+      { t: 'Honneur', c: { paladin: 3, fighter: 1, cleric: 1 }, b: { noble: 1, guard: 1 }, law: 2, ideal: 'Honneur' },
+      { t: 'Liberté', c: { barbarian: 1, rogue: 1, ranger: 1, sorcerer: 1, bard: 1 }, b: { wayfarer: 2, sailor: 1 }, law: -2, ideal: 'Liberté' },
+      { t: 'Savoir', c: { wizard: 3, monk: 1, cleric: 1 }, b: { sage: 1, scribe: 1 }, ideal: 'Connaissance' },
+      { t: 'Pouvoir', c: { warlock: 3, sorcerer: 2 }, good: -1, ideal: 'Pouvoir' },
+      { t: 'Partage', c: { cleric: 2, druid: 1, bard: 1 }, b: { acolyte: 2, hermit: 1 }, good: 2, ideal: 'Entraide' },
+    ],
+  },
+  {
+    magic: true,
+    q: 'Une vieille femme te tend un grimoire scellé qui murmure ton nom. Que fais-tu ?',
+    hint: 'Cette réponse décide de la place de la magie dans ton personnage.',
+    a: [
+      { t: 'Je l’ouvre sans hésiter : la magie m’appelle.', magic: 'yes', c: { wizard: 1, sorcerer: 1, warlock: 1 } },
+      { t: 'Je le feuillette prudemment, juste un peu.', magic: 'some', c: { paladin: 1, ranger: 1 } },
+      { t: 'Je le lui rends : je compte sur mes bras et mon acier.', magic: 'no', c: { fighter: 1, barbarian: 1 } },
+    ],
+  },
+  {
+    q: 'Un gamin affamé est pris la main dans ton sac. Que fais-tu ?',
+    a: [
+      { t: 'Je lui donne de quoi manger.', c: { cleric: 2, paladin: 1, druid: 1 }, good: 2 },
+      { t: 'Je le livre à la garde : la loi, c’est la loi.', c: { paladin: 1, fighter: 1, monk: 1 }, b: { guard: 3 }, law: 2 },
+      { t: 'Je lui apprends à voler sans se faire prendre.', c: { rogue: 3, bard: 1 }, b: { criminal: 2, charlatan: 1 }, law: -2 },
+      { t: 'Je lui fais passer l’envie de recommencer.', c: { barbarian: 2, fighter: 1, warlock: 1 }, good: -2 },
+    ],
+  },
+  {
+    q: 'En plein combat, ta place est…',
+    a: [
+      { t: 'Au premier rang, à encaisser les coups.', c: { barbarian: 3, fighter: 2, paladin: 2 }, s: { goliath: 1, dwarf: 1, orc: 1 } },
+      { t: 'Dans l’ombre, à frapper au bon moment.', c: { rogue: 3, monk: 1, ranger: 1 }, s: { halfling: 1, elf: 1 } },
+      { t: 'À distance, arc ou sort à la main.', c: { ranger: 2, wizard: 1, sorcerer: 1, warlock: 1 } },
+      { t: 'Juste derrière mes alliés, à les soutenir et les soigner.', c: { cleric: 3, bard: 2, druid: 2 }, good: 1 },
+    ],
+  },
+  {
+    q: 'D’où vient ta force ?',
+    a: [
+      { t: 'De mon corps, forgé par l’effort.', c: { monk: 2, fighter: 1, barbarian: 1 } },
+      { t: 'De mon esprit et de mes études.', c: { wizard: 3, monk: 1 } },
+      { t: 'De ma foi, ou d’un serment sacré.', c: { cleric: 3, paladin: 3 }, b: { acolyte: 3 }, law: 1 },
+      { t: 'D’une chose en moi que je ne contrôle pas tout à fait.', c: { sorcerer: 3, warlock: 2, barbarian: 2 }, s: { tiefling: 1, dragonborn: 1, aasimar: 1 } },
+      { t: 'De mon lien avec la nature et les bêtes.', c: { druid: 3, ranger: 2 }, b: { guide: 1, farmer: 1 } },
+    ],
+  },
+  {
+    q: 'Quelle est ta plus grande peur ?',
+    a: [
+      { t: 'Que personne ne se souvienne de moi.', c: { bard: 2, sorcerer: 1, fighter: 1 }, flaw: 'Besoin maladif d’être admiré' },
+      { t: 'Perdre le contrôle de moi-même.', c: { monk: 2, wizard: 1, barbarian: 1 }, law: 1, flaw: 'Refuse de montrer la moindre faiblesse' },
+      { t: 'Être enfermé, entravé, prisonnier.', c: { ranger: 1, rogue: 1, barbarian: 1, druid: 1 }, law: -1, flaw: 'Ne supporte aucune forme d’autorité' },
+      { t: 'Décevoir celles et ceux qui comptent sur moi.', c: { paladin: 2, cleric: 1, fighter: 1 }, good: 1, flaw: 'Porte le poids du monde sur ses épaules' },
+      { t: 'Manquer de quoi que ce soit, un jour.', c: { rogue: 1, warlock: 2 }, b: { merchant: 2 }, good: -1, flaw: 'Ne partage jamais rien, même avec ses proches' },
+    ],
+  },
+  {
+    q: 'Un marchand te propose une épée enchantée… manifestement volée. Tu…',
+    a: [
+      { t: 'L’achètes : un trésor est un trésor.', c: { rogue: 1, warlock: 1, fighter: 1 }, law: -1, good: -1 },
+      { t: 'Refuses, et préviens les autorités.', c: { paladin: 2 }, b: { guard: 1 }, law: 2 },
+      { t: 'Marchandes le prix, juste pour le plaisir.', c: { bard: 2, rogue: 1 }, b: { merchant: 3, charlatan: 2 } },
+      { t: 'Cherches à qui elle a été volée pour la lui rendre.', c: { cleric: 1, ranger: 1, paladin: 1 }, good: 2 },
+    ],
+  },
+  {
+    q: 'Enfant, ton héros préféré était…',
+    a: [
+      { t: 'Un chevalier légendaire.', c: { paladin: 2, fighter: 2 }, b: { noble: 2, soldier: 2 }, s: { human: 1, dwarf: 1, dragonborn: 1 }, hook: 'Rêve d’accomplir un exploit digne des légendes de son enfance.' },
+      { t: 'Une sorcière solitaire dans sa tour.', c: { wizard: 2, sorcerer: 1, warlock: 1 }, s: { elf: 1, gnome: 1 }, hook: 'Cherche le grimoire perdu d’une magicienne disparue.' },
+      { t: 'Un hors-la-loi au grand cœur.', c: { rogue: 2, ranger: 1, bard: 1 }, b: { criminal: 1, wayfarer: 2 }, s: { halfling: 1, human: 1 }, law: -1, good: 1, hook: 'A volé un puissant seigneur pour nourrir son quartier, et en paie encore le prix.' },
+      { t: 'Une bête sauvage et indomptable.', c: { barbarian: 3, druid: 2 }, s: { orc: 1, goliath: 1 }, hook: 'A grandi au contact d’une meute, loin des villes.' },
+    ],
+  },
+  {
+    q: 'Si tu pouvais renaître dans un autre corps, tu choisirais…',
+    a: [
+      { t: 'Un corps immense et robuste.', s: { goliath: 3, orc: 2, dwarf: 2 } },
+      { t: 'Une silhouette menue et agile.', s: { halfling: 3, gnome: 3 } },
+      { t: 'Des origines anciennes et mystérieuses.', s: { elf: 3, tiefling: 2, aasimar: 2, dragonborn: 2 } },
+      { t: 'Rester simplement humain.', s: { human: 4 } },
+    ],
+  },
+];
+const QUIZ_SPECIES = ['aasimar', 'dragonborn', 'dwarf', 'elf', 'gnome', 'goliath', 'halfling', 'human', 'orc', 'tiefling'];
+const CLASS_REVEAL = {
+  barbarian: 'Une force brute et un cœur ardent : quand la colère monte, rien ne t’arrête.',
+  bard: 'Tu charmes, tu inspires, tu racontes : chaque taverne devient ta scène.',
+  cleric: 'Ta foi est une lumière pour les autres, et un bouclier dans la tempête.',
+  druid: 'La nature te parle, et tu sais l’écouter mieux que personne.',
+  fighter: 'Discipline et courage : tu es l’allié sur qui tout le monde peut compter.',
+  monk: 'Calme intérieur et maîtrise du corps : ton esprit est ta meilleure arme.',
+  paladin: 'Un serment guide chacun de tes pas : tu défends ce qui est juste.',
+  ranger: 'L’œil aux aguets, loin des villes : la piste, c’est ta maison.',
+  rogue: 'Malin, discret, toujours un coup d’avance : les règles sont faites pour être contournées.',
+  sorcerer: 'Une magie sauvage coule dans tes veines, et elle ne demande qu’à jaillir.',
+  warlock: 'Le pouvoir a un prix, et tu as accepté de le payer.',
+  wizard: 'Le savoir est la plus grande des magies, et tu comptes tout apprendre.',
+};
+
+function quizProfile(answers) {
+  const p = { classes: {}, species: {}, backgrounds: {}, law: 0, good: 0, magic: 'any', picks: [] };
+  answers.forEach((ai, qi) => {
+    const a = QUIZ[qi]?.a[ai];
+    if (!a) return;
+    p.picks.push(a);
+    Object.entries(a.c ?? {}).forEach(([k, n]) => (p.classes[k] = (p.classes[k] ?? 0) + n));
+    Object.entries(a.s ?? {}).forEach(([k, n]) => (p.species[k] = (p.species[k] ?? 0) + n));
+    Object.entries(a.b ?? {}).forEach(([k, n]) => (p.backgrounds[k] = (p.backgrounds[k] ?? 0) + n));
+    p.law += a.law ?? 0;
+    p.good += a.good ?? 0;
+    if (a.magic) p.magic = a.magic;
+  });
+  const lc = p.law >= 2 ? 'Loyal' : p.law <= -2 ? 'Chaotique' : 'Neutre';
+  const ge = p.good >= 2 ? 'Bon' : p.good <= -2 ? 'Mauvais' : 'Neutre';
+  p.alignment = lc === 'Neutre' && ge === 'Neutre' ? 'Neutre' : `${lc} ${ge}`;
+  return p;
+}
+
+// Choix guidé par les points : le meilleur score (égalités au hasard), ou un tirage pondéré pour varier.
+function bestMatch(list, scores, varied) {
+  const sc = x => scores?.[x.id] ?? 0;
+  if (!varied) {
+    const max = Math.max(...list.map(sc));
+    return pickOne(list.filter(x => sc(x) === max));
+  }
+  const weights = list.map(x => (sc(x) + 1) ** 2);
+  let r = roll(weights.reduce((a, b) => a + b, 0));
+  return list.find((_, i) => (r -= weights[i]) < 0) ?? pickOne(list);
+}
+
 // Ordre conseillé des caractéristiques d'une classe (classes d'extension comprises).
 function classPriority(c) {
   if (PRIORITY[c?.id]) return PRIORITY[c.id];
@@ -1353,6 +1509,7 @@ function wizardView() {
     customClassName: '', customSpeciesName: '', source: 'all',
     subclass: '', levelChoices: [], search: '',
     rnd: { open: false, mode: 'cond', magic: 'any' }, rolled: false,
+    quiz: { started: false, i: 0, answers: [] }, quizResult: null,
   };
   const root = mount('');
 
@@ -1400,17 +1557,18 @@ function wizardView() {
 
   // Tirage au sort complet. « free » : tout au hasard, caractéristiques aux dés.
   // « cond » : au hasard dans les conditions choisies, avec un personnage cohérent (caractéristiques selon la classe).
-  function randomize() {
-    const { mode, magic } = w.rnd;
-    const free = mode === 'free';
+  function randomize(quiz = null, varied = false) {
+    const previousClass = w.classId;
+    const free = !quiz && w.rnd.mode === 'free';
+    const magic = quiz ? quiz.magic : w.rnd.magic;
     const lvl = w.level;
     const magicSubs = c => MAGIC_SUBCLASSES[c.id] ?? [];
-    let classes = CLASSES.filter(c => c.id !== 'custom' && c.skills?.length && (free || !c.verify));
+    let classes = CLASSES.filter(c => c.id !== 'custom' && c.skills?.length && (free || !c.verify) && (!quiz || PRIORITY[c.id]));
     if (!free && magic === 'yes') classes = classes.filter(c => c.caster === 'full' || c.caster === 'pact');
     if (!free && magic === 'some') classes = classes.filter(c => c.caster === 'half' || c.caster === 'third'
       || (lvl >= SUBCLASS_LEVEL && magicSubs(c).some(n => c.subclasses.includes(n))));
     if (!free && magic === 'no') classes = classes.filter(c => !c.caster && !c.spellAb);
-    let species = SPECIES.filter(x => x.id !== 'custom');
+    let species = SPECIES.filter(x => x.id !== 'custom' && (!quiz || QUIZ_SPECIES.includes(x.id)));
     let backgrounds = BACKGROUNDS;
     if (!free && magic === 'no') {
       species = species.filter(x => !MAGIC_SPECIES.includes(x.id));
@@ -1418,10 +1576,13 @@ function wizardView() {
     }
 
     for (let attempt = 0; attempt < 50; attempt++) {
-      const c = pickOne(classes);
+      // Questionnaire : le meilleur profil d'abord, puis des variantes si besoin.
+      const choose = (list, scores) => (quiz ? bestMatch(list, scores, varied || attempt >= 5) : pickOne(list));
+      // « Une autre proposition » : une autre classe que la précédente.
+      const c = choose(varied && classes.length > 1 ? classes.filter(x => x.id !== previousClass) : classes, quiz?.classes);
       Object.assign(w, {
-        classId: c.id, customClassName: '', speciesId: pickOne(species).id, customSpeciesName: '',
-        backgroundId: pickOne(backgrounds).id, lineage: '', keenSense: '', skillful: '', levelChoices: [], subclass: '',
+        classId: c.id, customClassName: '', speciesId: choose(species, quiz?.species).id, customSpeciesName: '',
+        backgroundId: choose(backgrounds, quiz?.backgrounds).id, lineage: '', keenSense: '', skillful: '', levelChoices: [], subclass: '',
       });
       const s = sp();
       if (s.lineages) w.lineage = pickOne(s.lineages);
@@ -1478,8 +1639,18 @@ function wizardView() {
       // Identité
       w.name = randomName();
       w.alignment = pickOne(ALIGNMENTS);
-      w.personality = `Trait : ${pickOne(TRAITS)}.\nIdéal : ${pickOne(IDEALS)}.\nDéfaut : ${pickOne(FLAWS)}.`;
-      w.backstory = pickOne(HOOKS);
+      w.quizResult = null;
+      if (quiz) {
+        const from = key => quiz.picks.map(a => a[key]).filter(Boolean);
+        w.alignment = quiz.alignment;
+        w.personality = `Trait : ${from('trait')[0] ?? pickOne(TRAITS)}.\nIdéal : ${from('ideal')[0] ?? pickOne(IDEALS)}.\nDéfaut : ${from('flaw')[0] ?? pickOne(FLAWS)}.`;
+        w.backstory = from('hook')[0] ?? pickOne(HOOKS);
+        w.quizResult = { reveal: CLASS_REVEAL[c.id] ?? '', magic };
+      }
+      if (!quiz) {
+        w.personality = `Trait : ${pickOne(TRAITS)}.\nIdéal : ${pickOne(IDEALS)}.\nDéfaut : ${pickOne(FLAWS)}.`;
+        w.backstory = pickOne(HOOKS);
+      }
 
       if ([0, 1, 2, 3, 4, 5, 6].every(i => valid(i))) {
         w.rolled = true;
@@ -1753,9 +1924,10 @@ function wizardView() {
         <div class="seg">
           <button data-a="rnd-mode" data-v="free" class="${mode === 'free' ? 'active' : ''}">Totalement aléatoire</button>
           <button data-a="rnd-mode" data-v="cond" class="${mode === 'cond' ? 'active' : ''}">Avec conditions</button>
+          <button data-a="rnd-mode" data-v="quiz" class="${mode === 'quiz' ? 'active' : ''}">Questionnaire</button>
         </div>
       </div>
-      <p class="small muted">${mode === 'free'
+      ${mode === 'quiz' ? quizPanel() : `<p class="small muted">${mode === 'free'
         ? 'Vrai hasard, sans aucune contrainte : classe, espèce et historique parmi tous les livres, caractéristiques tirées aux dés (4d6, on garde les 3 meilleurs) et placées au hasard. Le résultat peut être surprenant !'
         : 'Au hasard, mais en respectant tes conditions, et avec un personnage cohérent : caractéristiques du tableau standard placées selon la classe, bonus d’historique sur les bonnes caractéristiques.'}</p>
       ${mode === 'cond' ? `<div class="rnd-row">
@@ -1764,8 +1936,30 @@ function wizardView() {
       </div>
       ${MAGIC_OPTIONS.find(([v]) => v === magic)[2] ? `<p class="small muted">${esc(MAGIC_OPTIONS.find(([v]) => v === magic)[2])}</p>` : ''}` : ''}
       <p class="small muted">Niveau ${w.level} (fixé par le MJ). Nom, alignement, trait de personnalité et accroche d'histoire sont aussi tirés au sort.</p>
-      <button class="btn primary" data-a="rnd-go">🎲 Tirer au sort</button>
+      <button class="btn primary" data-a="rnd-go">🎲 Tirer au sort</button>`}
     </section>`;
+  }
+
+  function quizPanel() {
+    const z = w.quiz;
+    if (!z.started) {
+      return `<p class="small muted">Réponds à ${QUIZ.length} questions sur ta personnalité, tes envies et quelques dilemmes, dont une sur la magie.
+        Selon tes réponses, on te révèle la classe, l'espèce, l'historique et l'alignement qui te ressemblent.
+        Il n'y a pas de bonne ou de mauvaise réponse : suis ton instinct !</p>
+        <p class="small muted">Niveau ${w.level} (fixé par le MJ). Tout reste modifiable ensuite.</p>
+        <button class="btn primary" data-a="quiz-start">✨ Commencer le questionnaire</button>`;
+    }
+    const q = QUIZ[z.i];
+    return `<div class="quiz">
+      <div class="quiz-progress" aria-hidden="true"><span style="width:${Math.round((z.i / QUIZ.length) * 100)}%"></span></div>
+      <p class="small muted">Question ${z.i + 1} / ${QUIZ.length}</p>
+      <h3 class="quiz-q">${esc(q.q)}</h3>
+      ${q.hint ? `<p class="small quiz-hint">✨ ${esc(q.hint)}</p>` : ''}
+      <div class="quiz-answers">${q.a.map((a, i) => `<button class="quiz-a${z.answers[z.i] === i ? ' chosen' : ''}" data-a="quiz-ans" data-v="${i}">${esc(a.t)}</button>`).join('')}</div>
+      <div class="row">
+        <button class="btn ghost small" data-a="quiz-back">← ${z.i ? 'Question précédente' : 'Retour'}</button>
+      </div>
+    </div>`;
   }
 
   function render() {
@@ -1773,7 +1967,18 @@ function wizardView() {
       <div class="page-head"><h1>Nouveau personnage</h1>
         <button class="btn ${w.rnd.open ? 'primary' : ''}" data-a="rnd-toggle" aria-expanded="${w.rnd.open}">🎲 Personnage aléatoire</button></div>
       ${w.rnd.open ? randomPanel() : ''}
-      ${w.rolled && w.step === STEPS.length - 1 ? `<div class="notice wide rnd-done">🎲 Personnage tiré au sort ! Vérifie le récapitulatif : tu peux tout modifier en cliquant sur les étapes ci-dessous,
+      ${w.rolled && w.step === STEPS.length - 1 && w.quizResult ? `<div class="card quiz-result">
+        <p class="small muted">✨ D'après tes réponses, tu es…</p>
+        <h2>${esc(cls()?.name ?? '')} ${esc(R.speciesName({ speciesId: w.speciesId }) ?? '')}${w.subclass ? ` <small>(${esc(subclassName(cls(), w.subclass))})</small>` : ''}</h2>
+        <p>${esc(w.quizResult.reveal)}</p>
+        <p class="small muted">Historique : ${esc(bg()?.name ?? '')} · Alignement : ${esc(w.alignment)} · Magie : ${esc({ yes: 'oui', some: 'un peu', no: 'aucune', any: 'peu importe' }[w.quizResult.magic])}.
+          Tu peux tout modifier en cliquant sur les étapes ci-dessous et changer le nom.</p>
+        <div class="row">
+          <button class="btn small" data-a="quiz-other">🎲 Une autre proposition</button>
+          <button class="btn ghost small" data-a="quiz-restart">Refaire le questionnaire</button>
+        </div>
+      </div>` : ''}
+      ${w.rolled && w.step === STEPS.length - 1 && !w.quizResult ? `<div class="notice wide rnd-done">🎲 Personnage tiré au sort ! Vérifie le récapitulatif : tu peux tout modifier en cliquant sur les étapes ci-dessous,
         changer le nom, ou <button class="link" data-a="rnd-go">relancer les dés</button>.</div>` : ''}
       <div class="wizard-top">
         ${stepperBar()}
@@ -1828,6 +2033,19 @@ function wizardView() {
     if (act === 'rnd-toggle') w.rnd.open = !w.rnd.open;
     if (act === 'rnd-mode') w.rnd.mode = v;
     if (act === 'rnd-magic') w.rnd.magic = v;
+    if (act === 'quiz-start') Object.assign(w.quiz, { started: true, i: 0, answers: [] });
+    if (act === 'quiz-back') { if (w.quiz.i) w.quiz.i--; else w.quiz.started = false; }
+    if (act === 'quiz-ans') {
+      w.quiz.answers[w.quiz.i] = Number(v);
+      if (w.quiz.i < QUIZ.length - 1) w.quiz.i++;
+      else if (randomize(quizProfile(w.quiz.answers))) {
+        Object.assign(w.rnd, { open: false });
+        w.quiz.started = false;
+        goTo(STEPS.length - 1);
+      } else toast('Impossible de créer un personnage avec ces réponses : réessaie.', 'error');
+    }
+    if (act === 'quiz-other' && randomize(quizProfile(w.quiz.answers), true)) goTo(STEPS.length - 1);
+    if (act === 'quiz-restart') { Object.assign(w.quiz, { started: true, i: 0, answers: [] }); w.rnd.open = true; w.rnd.mode = 'quiz'; }
     if (act === 'rnd-go') {
       if (randomize()) { w.rnd.open = false; goTo(STEPS.length - 1); }
       else toast('Aucun personnage ne correspond à ces conditions : essaie « Peu importe ».', 'error');
